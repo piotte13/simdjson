@@ -22,7 +22,7 @@ really_inline uint64_t compute_quote_mask(uint64_t quote_bits) {
 }
 
 really_inline void find_whitespace_and_structurals(
-    simd_input<ARCHITECTURE> in, uint64_t &whitespace,
+    simd_input64 in, uint64_t &whitespace,
     uint64_t &structurals) {
   const uint8x16_t low_nibble_mask =
       (uint8x16_t){16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0};
@@ -41,12 +41,12 @@ really_inline void find_whitespace_and_structurals(
   const uint8x16_t structural_shufti_mask = vmovq_n_u8(0x7);
   structurals = v.map([&](auto _v) {
     return vtstq_u8(_v, structural_shufti_mask);
-  }).to_bitmask();
+  });
 
   const uint8x16_t whitespace_shufti_mask = vmovq_n_u8(0x18);
   whitespace = v.map([&](auto _v) {
     return vtstq_u8(_v, whitespace_shufti_mask);
-  }).to_bitmask();
+  });
 }
 
 #include "generic/stage1_find_marks_flatten.h"

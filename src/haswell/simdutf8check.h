@@ -2,7 +2,7 @@
 #define SIMDJSON_HASWELL_SIMDUTF8CHECK_H
 
 #include "simdjson/portability.h"
-#include "../simdutf8check.h"
+#include "simdjson/simdjson.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -193,16 +193,7 @@ avx_check_utf8_bytes(__m256i current_bytes,
   return pb;
 }
 
-}; // namespace simdjson::haswell
-UNTARGET_REGION // haswell
-
-TARGET_HASWELL
-namespace simdjson {
-
-using namespace simdjson::haswell;
-
-template <>
-struct utf8_checker<Architecture::HASWELL> {
+struct utf8_checker {
   __m256i has_error;
   avx_processed_utf_bytes previous;
 
@@ -213,7 +204,7 @@ struct utf8_checker<Architecture::HASWELL> {
     previous.carried_continuations = _mm256_setzero_si256();
   }
 
-  really_inline void check_next_input(simd_input<Architecture::HASWELL> in) {
+  really_inline void check_next_input(simd_input64 in) {
     __m256i high_bit = _mm256_set1_epi8(0x80u);
     __m256i any_bits_on = in.reduce([&](auto a, auto b) {
       return _mm256_or_si256(a, b);
@@ -241,7 +232,7 @@ struct utf8_checker<Architecture::HASWELL> {
   }
 }; // struct utf8_checker
 
-}; // namespace simdjson
+}; // namespace simdjson::haswell
 UNTARGET_REGION // haswell
 
 #endif // IS_X86_64

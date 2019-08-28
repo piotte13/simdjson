@@ -1,4 +1,5 @@
 #include "simdjson/portability.h"
+#include <algorithm>
 
 namespace {
 // for when clmul is unavailable

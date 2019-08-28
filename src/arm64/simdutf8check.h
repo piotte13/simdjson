@@ -1,13 +1,13 @@
-// From https://github.com/cyb70289/utf8/blob/master/lemire-neon.c
-// Adapted from https://github.com/lemire/fastvalidate-utf-8
-
 #ifndef SIMDJSON_ARM64_SIMDUTF8CHECK_H
 #define SIMDJSON_ARM64_SIMDUTF8CHECK_H
+
+// From https://github.com/cyb70289/utf8/blob/master/lemire-neon.c
+// Adapted from https://github.com/lemire/fastvalidate-utf-8
 
 #if defined(_ARM_NEON) || defined(__aarch64__) ||                              \
     (defined(_MSC_VER) && defined(_M_ARM64))
 
-#include "../simdutf8check.h"
+#include "simdjson/portability.h"
 #include <arm_neon.h>
 #include <cinttypes>
 #include <cstddef>
@@ -178,7 +178,7 @@ check_utf8_bytes(int8x16_t current_bytes, struct processed_utf_bytes *previous,
 }
 
 // Checks that all bytes are ascii
-really_inline bool check_ascii_neon(simd_input<Architecture::ARM64> in) {
+really_inline bool check_ascii_neon(simd_input64 in) {
   // checking if the most significant bit is always equal to 0.
   uint8x16_t high_bit = vdupq_n_u8(0x80);
   uint8x16_t any_bits_on = in.reduce([&](auto a, auto b) {
@@ -191,18 +191,11 @@ really_inline bool check_ascii_neon(simd_input<Architecture::ARM64> in) {
   return vget_lane_u64(result, 0) == 0;
 }
 
-} // namespace simdjson::arm64
-
-namespace simdjson {
-
-using namespace simdjson::arm64;
-
-template <>
-struct utf8_checker<Architecture::ARM64> {
+struct utf8_checker {
   int8x16_t has_error{};
   processed_utf_bytes previous{};
 
-  really_inline void check_next_input(simd_input<Architecture::ARM64> in) {
+  really_inline void check_next_input(simd_input64 in) {
     if (check_ascii_neon(in)) {
       // All bytes are ascii. Therefore the byte that was just before must be
       // ascii too. We only check the byte that was just before simd_input. Nines
@@ -231,6 +224,6 @@ struct utf8_checker<Architecture::ARM64> {
 
 }; // struct utf8_checker
 
-} // namespace simdjson
+} // namespace simdjson::arm64
 #endif
 #endif

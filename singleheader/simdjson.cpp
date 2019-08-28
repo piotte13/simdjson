@@ -1,4 +1,4 @@
-/* auto-generated on Fri Aug 23 11:02:39 DST 2019. Do not edit! */
+/* auto-generated on Tue Sep  3 13:41:23 DST 2019. Do not edit! */
 #include "simdjson.h"
 
 /* used for http://dmalloc.com/ Dmalloc - Debug Malloc Library */
@@ -448,27 +448,6 @@ ParsedJson build_parsed_json(const uint8_t *buf, size_t len,
 }
 } // namespace simdjson
 /* end file src/jsonparser.cpp */
-/* begin file src/simd_input.h */
-#ifndef SIMDJSON_SIMD_INPUT_H
-#define SIMDJSON_SIMD_INPUT_H
-
-#include <cassert>
-
-namespace simdjson {
-
-template <Architecture>
-struct simd_input {
-    simd_input(const uint8_t *ptr);
-    // a straightforward comparison of a mask against input.
-    uint64_t eq(uint8_t m);
-    // find all values less than or equal than the content of maxval (using unsigned arithmetic)
-    uint64_t lteq(uint8_t m);
-}; // struct simd_input
-
-} // namespace simdjson
-
-#endif
-/* end file src/simd_input.h */
 /* begin file src/arm64/architecture.h */
 #ifndef SIMDJSON_ARM64_ARCHITECTURE_H
 #define SIMDJSON_ARM64_ARCHITECTURE_H
@@ -533,7 +512,7 @@ static const Architecture ARCHITECTURE = Architecture::WESTMERE;
 
 #ifdef IS_ARM64
 
-namespace simdjson {
+namespace simdjson::arm64 {
 
 really_inline uint16_t neon_movemask(uint8x16_t input) {
   const uint8x16_t bit_mask = {0x01, 0x02, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80,
@@ -560,57 +539,146 @@ really_inline uint64_t neon_movemask_bulk(uint8x16_t p0, uint8x16_t p1,
   return vgetq_lane_u64(vreinterpretq_u64_u8(sum0), 0);
 }
 
-template <>
-struct simd_input<Architecture::ARM64> {
-  uint8x16_t i0;
-  uint8x16_t i1;
-  uint8x16_t i2;
-  uint8x16_t i3;
+struct simd_input64 {
+  uint8x16_t chunks[4];
 
-  really_inline simd_input(const uint8_t *ptr) {
-    this->i0 = vld1q_u8(ptr + 0);
-    this->i1 = vld1q_u8(ptr + 16);
-    this->i2 = vld1q_u8(ptr + 32);
-    this->i3 = vld1q_u8(ptr + 48);
+  static const size_t SIZE = 64;
+
+  really_inline simd_input64(const uint8_t *ptr) {
+    this->chunks[0] = vld1q_u8(ptr + 0*16);
+    this->chunks[1] = vld1q_u8(ptr + 1*16);
+    this->chunks[2] = vld1q_u8(ptr + 2*16);
+    this->chunks[3] = vld1q_u8(ptr + 3*16);
+  }
+
+  really_inline simd_input64(uint8x16_t chunk0, uint8x16_t chunk1, uint8x16_t chunk2, uint8x16_t chunk3) {
+    this->chunks[0] = chunk0;
+    this->chunks[1] = chunk1;
+    this->chunks[2] = chunk2;
+    this->chunks[3] = chunk3;
   }
 
   template <typename F>
-  really_inline uint64_t build_bitmask(F const& chunk_to_mask) {
-    uint8x16_t r0 = chunk_to_mask(this->i0);
-    uint8x16_t r1 = chunk_to_mask(this->i1);
-    uint8x16_t r2 = chunk_to_mask(this->i2);
-    uint8x16_t r3 = chunk_to_mask(this->i3);
-    return neon_movemask_bulk(r0, r1, r2, r3);
+  really_inline void each(F const& each_chunk)
+  {
+    each_chunk(this->chunks[0]);
+    each_chunk(this->chunks[1]);
+    each_chunk(this->chunks[2]);
+    each_chunk(this->chunks[3]);
   }
 
   template <typename F>
-  really_inline simd_input<Architecture::ARM64> map(F const& map_chunk) {
-    simd_input<Architecture::ARM64> result = {
-      map_chunk(this->i0),
-      map_chunk(this->i1),
-      map_chunk(this->i2),
-      map_chunk(this->i3)
-    };
-    return result;
+  really_inline simd_input64 map(F const& map_chunk) {
+    return simd_input64(
+      map_chunk(this->chunks[0]),
+      map_chunk(this->chunks[1]),
+      map_chunk(this->chunks[2]),
+      map_chunk(this->chunks[3])
+    );
+  }
+
+  template <typename F>
+  really_inline simd_input64 map(simd_input64 b, F const& map_chunk) {
+    return simd_input64(
+      map_chunk(this->chunks[0], b.chunks[0]),
+      map_chunk(this->chunks[1], b.chunks[1]),
+      map_chunk(this->chunks[2], b.chunks[2]),
+      map_chunk(this->chunks[3], b.chunks[3])
+    );
+  }
+
+  template <typename F>
+  really_inline uint8x16_t reduce(F const& reduce_pair) {
+    uint8x16_t r01 = reduce_pair(this->chunks[0], this->chunks[1]);
+    uint8x16_t r23 = reduce_pair(this->chunks[2], this->chunks[3]);
+    return reduce_pair(r01, r23);
+  }
+
+  really_inline uint64_t to_bitmask() {
+    return neon_movemask_bulk(this->chunks[0], this->chunks[1], this->chunks[2], this->chunks[3]);
   }
 
   really_inline uint64_t eq(uint8_t m) {
     const uint8x16_t mask = vmovq_n_u8(m);
-    return this->build_bitmask([&](uint8x16_t chunk) {
-      return vceqq_u8(chunk, mask);
-    });
+    return this->map( [&](auto a) {
+      return vceqq_u8(a, mask);
+    }).to_bitmask();
   }
 
   really_inline uint64_t lteq(uint8_t m) {
     const uint8x16_t mask = vmovq_n_u8(m);
-    return this->build_bitmask([&](uint8x16_t chunk) {
-      return vcleq_u8(chunk, mask);
-    });
+    return this->map( [&](auto a) {
+      return vcleq_u8(a, mask);
+    }).to_bitmask();
   }
 
 }; // struct simd_input
 
-} // namespace simdjson
+struct simd_input {
+  simd_input64 chunks64[2];
+
+  static const size_t SIZE = 2*64; // 128
+
+  really_inline simd_input(const uint8_t *ptr) : simd_input(simd_input64(ptr + 0*64), simd_input64(ptr + 1*64)) { }
+  really_inline simd_input(simd_input64 chunk0, simd_input64 chunk1) : chunks64({chunk0, chunk1}) { }
+
+  template <typename F>
+  really_inline void each64(F const& each64) {
+    each64(this->chunks64[0]);
+    each64(this->chunks64[1]);
+  }
+
+  template <typename F>
+  really_inline void each(F const& each_chunk) {
+    this->each64([&](auto chunk) { chunk.each(each_chunk); });
+  }
+
+  template <typename F>
+  really_inline simd_input map64(F const& map_chunk64) {
+    return simd_input(
+      map_chunk64(this->chunks64[0]),
+      map_chunk64(this->chunks64[1])
+    );
+  }
+
+  template <typename F>
+  really_inline simd_input map64(simd_input b, F const& map_chunk64) {
+    return simd_input(
+      map_chunk64(this->chunks64[0], b.chunks64[0]),
+      map_chunk64(this->chunks64[1], b.chunks64[1])
+    );
+  }
+
+  template <typename F>
+  really_inline simd_input map(F const& map_chunk) {
+    return this->map64([&](auto chunk) { return chunk.map(map_chunk); });
+  }
+
+  template <typename F>
+  really_inline simd_input map(simd_input b, F const& map_chunk) {
+    return this->map64(b, [&](auto chunk_a, auto chunk_b) { return chunk_a.map(chunk_b, map_chunk); });
+  }
+
+  template <typename F>
+  really_inline uint8x16_t reduce(F const& reduce_chunk) {
+    return reduce_chunk(
+      this->chunks64[0].reduce(reduce_chunk),
+      this->chunks64[1].reduce(reduce_chunk)
+    );
+  }
+
+  really_inline uint8x16_t to_bitmask() {
+    uint64_t[4] masks = {
+      this->chunks64[0].to_bitmask(),
+      this->chunks64[1].to_bitmask(),
+      this->chunks64[2].to_bitmask(),
+      this->chunks64[3].to_bitmask()
+    };
+    return vld1q_u64(masks);
+  }
+};
+
+} // namespace simdjson::arm64
 
 #endif // IS_ARM64
 #endif // SIMDJSON_ARM64_SIMD_INPUT_H
@@ -623,42 +691,150 @@ struct simd_input<Architecture::ARM64> {
 #ifdef IS_X86_64
 
 TARGET_HASWELL
-namespace simdjson {
+namespace simdjson::haswell {
 
-template <>
-struct simd_input<Architecture::HASWELL> {
-  __m256i lo;
-  __m256i hi;
+struct simd_input64 {
+  __m256i chunks[2];
 
-  really_inline simd_input(const uint8_t *ptr) {
-    this->lo = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(ptr + 0));
-    this->hi = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(ptr + 32));
+  really_inline simd_input64(const uint8_t *ptr) {
+    this->chunks[0] = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(ptr + 0*32));
+    this->chunks[1] = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(ptr + 1*32));
+  }
+
+  really_inline simd_input64(__m256i chunk0, __m256i chunk1) {
+    this->chunks[0] = chunk0;
+    this->chunks[1] = chunk1;
   }
 
   template <typename F>
-  really_inline uint64_t build_bitmask(F const& chunk_to_mask) {
-    uint64_t r0 = static_cast<uint32_t>(_mm256_movemask_epi8(chunk_to_mask(this->lo)));
-    uint64_t r1 =                       _mm256_movemask_epi8(chunk_to_mask(this->hi));
+  really_inline void each(F const& each_chunk) {
+    each_chunk(this->chunks[0]);
+    each_chunk(this->chunks[1]);
+  }
+
+  template <typename F>
+  really_inline simd_input64 map(F const& map_chunk) {
+    return simd_input64(
+      map_chunk(this->chunks[0]),
+      map_chunk(this->chunks[1])
+    );
+  }
+
+  template <typename F>
+  really_inline simd_input64 map(simd_input64 b, F const& map_chunk) {
+    return simd_input64(
+      map_chunk(this->chunks[0], b.chunks[0]),
+      map_chunk(this->chunks[1], b.chunks[1])
+    );
+  }
+
+  template <typename F>
+  really_inline __m256i reduce(F const& reduce_pair) {
+    return reduce_pair(this->chunks[0], this->chunks[1]);
+  }
+
+  really_inline uint64_t to_bitmask() {
+    uint64_t r0 = static_cast<uint32_t>(_mm256_movemask_epi8(this->chunks[0]));
+    uint64_t r1 =                       _mm256_movemask_epi8(this->chunks[1]);
     return r0 | (r1 << 32);
   }
 
   really_inline uint64_t eq(uint8_t m) {
     const __m256i mask = _mm256_set1_epi8(m);
-    return this->build_bitmask([&] (auto chunk) {
-      return _mm256_cmpeq_epi8(chunk, mask);
-    });
+    return this->map( [&](auto a) {
+      return _mm256_cmpeq_epi8(a, mask);
+    }).to_bitmask();
   }
 
   really_inline uint64_t lteq(uint8_t m) {
     const __m256i maxval = _mm256_set1_epi8(m);
-    return this->build_bitmask([&] (auto chunk) {
-      return _mm256_cmpeq_epi8(_mm256_max_epu8(maxval, chunk), maxval);
-    });
+    return this->map( [&](auto a) {
+      return _mm256_cmpeq_epi8(_mm256_max_epu8(maxval, a), maxval);
+    }).to_bitmask();
   }
 
-}; // struct simd_input
+}; // struct simd_input64
 
-} // namespace simdjson
+struct simd_input {
+  simd_input64 chunks64[4];
+
+  static const size_t SIZE = 4*64; // 256
+
+  really_inline simd_input(const uint8_t *ptr) : simd_input(simd_input64(ptr + 0*64), simd_input64(ptr + 1*64), simd_input64(ptr + 2*64), simd_input64(ptr + 3*64)) { }
+  really_inline simd_input(simd_input64 chunk0, simd_input64 chunk1, simd_input64 chunk2, simd_input64 chunk3) : chunks64({chunk0, chunk1, chunk2, chunk3}) { }
+
+  template <typename F>
+  really_inline void each64(F const& each) {
+    each(this->chunks64[0]);
+    each(this->chunks64[1]);
+    each(this->chunks64[2]);
+    each(this->chunks64[3]);
+  }
+
+  template <typename F>
+  really_inline void each(F const& each_chunk) {
+    this->each64([&](auto chunk) { chunk->each(each_chunk); });
+  }
+
+  template <typename F>
+  really_inline simd_input map64(F const& map_chunk64) {
+    return simd_input(
+      map_chunk64(this->chunks64[0]),
+      map_chunk64(this->chunks64[1]),
+      map_chunk64(this->chunks64[2]),
+      map_chunk64(this->chunks64[3])
+    );
+  }
+
+  template <typename F>
+  really_inline simd_input map64(simd_input b, F const& map_chunk64) {
+    return simd_input(
+      map_chunk64(this->chunks64[0], b.chunks64[0]),
+      map_chunk64(this->chunks64[1], b.chunks64[1]),
+      map_chunk64(this->chunks64[2], b.chunks64[2]),
+      map_chunk64(this->chunks64[3], b.chunks64[3])
+    );
+  }
+
+  template <typename F>
+  really_inline simd_input map(F const& map_chunk) {
+    return this->map64([&](auto chunk) { return chunk->map(map_chunk); });
+  }
+
+  template <typename F>
+  really_inline simd_input map(simd_input b, F const& map_chunk) {
+    return this->map64(b, [&](auto chunk_a, auto chunk_b) { return chunk_a->map(chunk_b, map_chunk); });
+  }
+
+  template <typename F>
+  really_inline __m256i reduce(F const& reduce_chunk) {
+    return reduce_chunk(
+      reduce_chunk(
+        this->chunks64[0].reduce(reduce_chunk),
+        this->chunks64[1].reduce(reduce_chunk)
+      ),
+      reduce_chunk(
+        this->chunks64[2].reduce(reduce_chunk),
+        this->chunks64[3].reduce(reduce_chunk)
+      )
+    );
+  }
+
+  really_inline __m256i to_bitmask() {
+    return _mm256_setr_epi32(
+        _mm256_movemask_epi8(this->chunks64[0].chunks[0]),
+        _mm256_movemask_epi8(this->chunks64[0].chunks[1]),
+        _mm256_movemask_epi8(this->chunks64[1].chunks[0]),
+        _mm256_movemask_epi8(this->chunks64[1].chunks[1]),
+        _mm256_movemask_epi8(this->chunks64[2].chunks[0]),
+        _mm256_movemask_epi8(this->chunks64[2].chunks[1]),
+        _mm256_movemask_epi8(this->chunks64[3].chunks[0]),
+        _mm256_movemask_epi8(this->chunks64[3].chunks[1])
+    );
+  }
+};
+
+}
 UNTARGET_REGION
 
 #endif // IS_X86_64
@@ -672,79 +848,165 @@ UNTARGET_REGION
 #ifdef IS_X86_64
 
 TARGET_WESTMERE
-namespace simdjson {
+namespace simdjson::westmere {
 
-template <>
-struct simd_input<Architecture::WESTMERE> {
-  __m128i v0;
-  __m128i v1;
-  __m128i v2;
-  __m128i v3;
+struct simd_input64 {
+  __m128i chunks[4];
 
-  really_inline simd_input(const uint8_t *ptr) {
-    this->v0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr + 0));
-    this->v1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr + 16));
-    this->v2 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr + 32));
-    this->v3 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr + 48));
+  really_inline simd_input64(const uint8_t *ptr) {
+    this->chunks[0] = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr + 0));
+    this->chunks[1] = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr + 16));
+    this->chunks[2] = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr + 32));
+    this->chunks[3] = _mm_loadu_si128(reinterpret_cast<const __m128i *>(ptr + 48));
+  }
+
+  really_inline simd_input64(__m128i i0, __m128i i1, __m128i i2, __m128i i3)
+  {
+    this->chunks[0] = i0;
+    this->chunks[1] = i1;
+    this->chunks[2] = i2;
+    this->chunks[3] = i3;
   }
 
   template <typename F>
-  really_inline uint64_t build_bitmask(F const& chunk_to_mask) {
-    uint64_t r0 = static_cast<uint32_t>(_mm_movemask_epi8(chunk_to_mask(this->v0)));
-    uint64_t r1 =                       _mm_movemask_epi8(chunk_to_mask(this->v1));
-    uint64_t r2 =                       _mm_movemask_epi8(chunk_to_mask(this->v2));
-    uint64_t r3 =                       _mm_movemask_epi8(chunk_to_mask(this->v3));
+  really_inline void each(F const& each_chunk)
+  {
+    each_chunk(this->chunks[0]);
+    each_chunk(this->chunks[1]);
+    each_chunk(this->chunks[2]);
+    each_chunk(this->chunks[3]);
+  }
+
+  template <typename F>
+  really_inline simd_input64 map(F const& map_chunk) {
+    return simd_input64(
+      map_chunk(this->chunks[0]),
+      map_chunk(this->chunks[1]),
+      map_chunk(this->chunks[2]),
+      map_chunk(this->chunks[3])
+    );
+  }
+
+  template <typename F>
+  really_inline simd_input64 map(simd_input64 b, F const& map_chunk) {
+    return simd_input64(
+      map_chunk(this->chunks[0], b.chunks[0]),
+      map_chunk(this->chunks[1], b.chunks[1]),
+      map_chunk(this->chunks[2], b.chunks[2]),
+      map_chunk(this->chunks[3], b.chunks[3])
+    );
+  }
+
+  template <typename F>
+  really_inline __m128i reduce(F const& reduce_pair) {
+    __m128i r01 = reduce_pair(this->chunks[0], this->chunks[1]);
+    __m128i r23 = reduce_pair(this->chunks[2], this->chunks[3]);
+    return reduce_pair(r01, r23);
+  }
+
+  really_inline uint64_t to_bitmask() {
+    uint64_t r0 = static_cast<uint32_t>(_mm_movemask_epi8(this->chunks[0]));
+    uint64_t r1 =                       _mm_movemask_epi8(this->chunks[1]);
+    uint64_t r2 =                       _mm_movemask_epi8(this->chunks[2]);
+    uint64_t r3 =                       _mm_movemask_epi8(this->chunks[3]);
     return r0 | (r1 << 16) | (r2 << 32) | (r3 << 48);
   }
 
   really_inline uint64_t eq(uint8_t m) {
     const __m128i mask = _mm_set1_epi8(m);
-    return this->build_bitmask([&](auto chunk) {
-      return _mm_cmpeq_epi8(chunk, mask);
-    });
+    return this->map( [&](auto a) {
+      return _mm_cmpeq_epi8(a, mask);
+    }).to_bitmask();
   }
 
   really_inline uint64_t lteq(uint8_t m) {
     const __m128i maxval = _mm_set1_epi8(m);
-    return this->build_bitmask([&](auto chunk) {
-      return _mm_cmpeq_epi8(_mm_max_epu8(maxval, chunk), maxval);
-    });
+    return this->map( [&](auto a) {
+      return _mm_cmpeq_epi8(_mm_max_epu8(maxval, a), maxval);
+    }).to_bitmask();
   }
 
-}; // struct simd_input
+}; // struct simd_input64
 
-} // namespace simdjson
-UNTARGET_REGION
+struct simd_input {
+  simd_input64 chunks64[2];
+
+  static const size_t SIZE = 2*64; // 128
+
+  really_inline simd_input(const uint8_t *ptr) : simd_input(simd_input64(ptr + 0*64), simd_input64(ptr + 1*64)) { }
+  really_inline simd_input(simd_input64 chunk0, simd_input64 chunk1) : chunks64({chunk0, chunk1}) { }
+
+  template <typename F>
+  really_inline void each64(F const& each64) {
+    each64(this->chunks64[0]);
+    each64(this->chunks64[1]);
+  }
+
+  template <typename F>
+  really_inline void each(F const& each_chunk) {
+    this->each64([&](auto chunk) { chunk.each(each_chunk); });
+  }
+
+  template <typename F>
+  really_inline simd_input map64(F const& map_chunk64) {
+    return simd_input(
+      map_chunk64(this->chunks64[0]),
+      map_chunk64(this->chunks64[1])
+    );
+  }
+
+  template <typename F>
+  really_inline simd_input map64(simd_input b, F const& map_chunk64) {
+    return simd_input(
+      map_chunk64(this->chunks64[0], b.chunks64[0]),
+      map_chunk64(this->chunks64[1], b.chunks64[1])
+    );
+  }
+
+  template <typename F>
+  really_inline simd_input map(F const& map_chunk) {
+    return this->map64([&](auto chunk) { return chunk.map(map_chunk); });
+  }
+
+  template <typename F>
+  really_inline simd_input map(simd_input b, F const& map_chunk) {
+    return this->map64(b, [&](auto chunk_a, auto chunk_b) { return chunk_a.map(chunk_b, map_chunk); });
+  }
+
+  template <typename F>
+  really_inline __m128i reduce(F const& reduce_chunk) {
+    return reduce_chunk(
+      this->chunks64[0].reduce(reduce_chunk),
+      this->chunks64[1].reduce(reduce_chunk)
+    );
+  }
+
+  really_inline __m128i to_bitmask() {
+    return _mm_setr_epi16(
+        _mm_movemask_epi8(this->chunks64[0].chunks[0]),
+        _mm_movemask_epi8(this->chunks64[0].chunks[1]),
+        _mm_movemask_epi8(this->chunks64[0].chunks[2]),
+        _mm_movemask_epi8(this->chunks64[0].chunks[3]),
+        _mm_movemask_epi8(this->chunks64[1].chunks[0]),
+        _mm_movemask_epi8(this->chunks64[1].chunks[1]),
+        _mm_movemask_epi8(this->chunks64[1].chunks[2]),
+        _mm_movemask_epi8(this->chunks64[1].chunks[3])
+    );
+  }
+};
+
+} // namespace simdjson::westmere
+UNTARGET_REGION // westmere
 
 #endif // IS_X86_64
 #endif // SIMDJSON_WESTMERE_SIMD_INPUT_H
 /* end file src/westmere/simd_input.h */
-/* begin file src/simdutf8check.h */
-#ifndef SIMDJSON_SIMDUTF8CHECK_H
-#define SIMDJSON_SIMDUTF8CHECK_H
-
-
-namespace simdjson {
-
-// Checks UTF8, chunk by chunk.
-template <Architecture T>
-struct utf8_checker {
-    // Process the next chunk of input.
-    void check_next_input(simd_input<T> in);
-    // Find out what (if any) errors have occurred
-    ErrorValues errors();
-};
-
-} // namespace simdjson
-
-#endif // SIMDJSON_SIMDUTF8CHECK_H
-/* end file src/simdutf8check.h */
 /* begin file src/arm64/simdutf8check.h */
-// From https://github.com/cyb70289/utf8/blob/master/lemire-neon.c
-// Adapted from https://github.com/lemire/fastvalidate-utf-8
-
 #ifndef SIMDJSON_ARM64_SIMDUTF8CHECK_H
 #define SIMDJSON_ARM64_SIMDUTF8CHECK_H
+
+// From https://github.com/cyb70289/utf8/blob/master/lemire-neon.c
+// Adapted from https://github.com/lemire/fastvalidate-utf-8
 
 #if defined(_ARM_NEON) || defined(__aarch64__) ||                              \
     (defined(_MSC_VER) && defined(_M_ARM64))
@@ -919,31 +1181,24 @@ check_utf8_bytes(int8x16_t current_bytes, struct processed_utf_bytes *previous,
 }
 
 // Checks that all bytes are ascii
-really_inline bool check_ascii_neon(simd_input<Architecture::ARM64> in) {
+really_inline bool check_ascii_neon(simd_input64 in) {
   // checking if the most significant bit is always equal to 0.
   uint8x16_t high_bit = vdupq_n_u8(0x80);
-  uint8x16_t t0 = vorrq_u8(in.i0, in.i1);
-  uint8x16_t t1 = vorrq_u8(in.i2, in.i3);
-  uint8x16_t t3 = vorrq_u8(t0, t1);
-  uint8x16_t t4 = vandq_u8(t3, high_bit);
-  uint64x2_t v64 = vreinterpretq_u64_u8(t4);
+  uint8x16_t any_bits_on = in.reduce([&](auto a, auto b) {
+    return vorrq_u8(a, b);
+  });
+  uint8x16_t high_bit_on = vandq_u8(any_bits_on, high_bit);
+  uint64x2_t v64 = vreinterpretq_u64_u8(high_bit_on);
   uint32x2_t v32 = vqmovn_u64(v64);
   uint64x1_t result = vreinterpret_u64_u32(v32);
   return vget_lane_u64(result, 0) == 0;
 }
 
-} // namespace simdjson::arm64
-
-namespace simdjson {
-
-using namespace simdjson::arm64;
-
-template <>
-struct utf8_checker<Architecture::ARM64> {
+struct utf8_checker {
   int8x16_t has_error{};
   processed_utf_bytes previous{};
 
-  really_inline void check_next_input(simd_input<Architecture::ARM64> in) {
+  really_inline void check_next_input(simd_input64 in) {
     if (check_ascii_neon(in)) {
       // All bytes are ascii. Therefore the byte that was just before must be
       // ascii too. We only check the byte that was just before simd_input. Nines
@@ -956,14 +1211,9 @@ struct utf8_checker<Architecture::ARM64> {
                   this->has_error);
     } else {
       // it is not ascii so we have to do heavy work
-      this->previous = check_utf8_bytes(vreinterpretq_s8_u8(in.i0),
-                                        &(this->previous), &(this->has_error));
-      this->previous = check_utf8_bytes(vreinterpretq_s8_u8(in.i1),
-                                        &(this->previous), &(this->has_error));
-      this->previous = check_utf8_bytes(vreinterpretq_s8_u8(in.i2),
-                                        &(this->previous), &(this->has_error));
-      this->previous = check_utf8_bytes(vreinterpretq_s8_u8(in.i3),
-                                        &(this->previous), &(this->has_error));
+      in.each([&](auto _in) {
+        this->previous = check_utf8_bytes(vreinterpretq_s8_u8(_in), &(this->previous), &(this->has_error));
+      });
     }
   }
 
@@ -977,7 +1227,7 @@ struct utf8_checker<Architecture::ARM64> {
 
 }; // struct utf8_checker
 
-} // namespace simdjson
+} // namespace simdjson::arm64
 #endif
 #endif
 /* end file src/arm64/simdutf8check.h */
@@ -1175,16 +1425,7 @@ avx_check_utf8_bytes(__m256i current_bytes,
   return pb;
 }
 
-}; // namespace simdjson::haswell
-UNTARGET_REGION // haswell
-
-TARGET_HASWELL
-namespace simdjson {
-
-using namespace simdjson::haswell;
-
-template <>
-struct utf8_checker<Architecture::HASWELL> {
+struct utf8_checker {
   __m256i has_error;
   avx_processed_utf_bytes previous;
 
@@ -1195,9 +1436,12 @@ struct utf8_checker<Architecture::HASWELL> {
     previous.carried_continuations = _mm256_setzero_si256();
   }
 
-  really_inline void check_next_input(simd_input<Architecture::HASWELL> in) {
+  really_inline void check_next_input(simd_input64 in) {
     __m256i high_bit = _mm256_set1_epi8(0x80u);
-    if ((_mm256_testz_si256(_mm256_or_si256(in.lo, in.hi), high_bit)) == 1) {
+    __m256i any_bits_on = in.reduce([&](auto a, auto b) {
+      return _mm256_or_si256(a, b);
+    });
+    if ((_mm256_testz_si256(any_bits_on, high_bit)) == 1) {
       // it is ascii, we just check continuation
       this->has_error = _mm256_or_si256(
           _mm256_cmpgt_epi8(this->previous.carried_continuations,
@@ -1207,10 +1451,9 @@ struct utf8_checker<Architecture::HASWELL> {
           this->has_error);
     } else {
       // it is not ascii so we have to do heavy work
-      this->previous =
-          avx_check_utf8_bytes(in.lo, &(this->previous), &(this->has_error));
-      this->previous =
-          avx_check_utf8_bytes(in.hi, &(this->previous), &(this->has_error));
+      in.each([&](auto _in) {
+        this->previous = avx_check_utf8_bytes(_in, &(this->previous), &(this->has_error));
+      });
     }
   }
 
@@ -1221,7 +1464,7 @@ struct utf8_checker<Architecture::HASWELL> {
   }
 }; // struct utf8_checker
 
-}; // namespace simdjson
+}; // namespace simdjson::haswell
 UNTARGET_REGION // haswell
 
 #endif // IS_X86_64
@@ -1392,16 +1635,7 @@ check_utf8_bytes(__m128i current_bytes, struct processed_utf_bytes *previous,
   return pb;
 }
 
-} // namespace simdjson::westmere
-UNTARGET_REGION // westmere
-
-TARGET_WESTMERE
-namespace simdjson {
-
-using namespace simdjson::westmere;
-
-template <>
-struct utf8_checker<Architecture::WESTMERE> {
+struct utf8_checker {
   __m128i has_error = _mm_setzero_si128();
   processed_utf_bytes previous{
       _mm_setzero_si128(), // raw_bytes
@@ -1409,9 +1643,12 @@ struct utf8_checker<Architecture::WESTMERE> {
       _mm_setzero_si128()  // carried_continuations
   };
 
-  really_inline void check_next_input(simd_input<Architecture::WESTMERE> in) {
+  really_inline void check_next_input(simd_input64 in) {
     __m128i high_bit = _mm_set1_epi8(0x80u);
-    if ((_mm_testz_si128(_mm_or_si128(in.v0, in.v1), high_bit)) == 1) {
+    __m128i any_bits_on = in.reduce([&](auto a, auto b) {
+      return _mm_or_si128(a, b);
+    });
+    if ((_mm_testz_si128( any_bits_on, high_bit)) == 1) {
       // it is ascii, we just check continuation
       this->has_error =
           _mm_or_si128(_mm_cmpgt_epi8(this->previous.carried_continuations,
@@ -1420,25 +1657,9 @@ struct utf8_checker<Architecture::WESTMERE> {
                       this->has_error);
     } else {
       // it is not ascii so we have to do heavy work
-      this->previous =
-          check_utf8_bytes(in.v0, &(this->previous), &(this->has_error));
-      this->previous =
-          check_utf8_bytes(in.v1, &(this->previous), &(this->has_error));
-    }
-
-    if ((_mm_testz_si128(_mm_or_si128(in.v2, in.v3), high_bit)) == 1) {
-      // it is ascii, we just check continuation
-      this->has_error =
-          _mm_or_si128(_mm_cmpgt_epi8(this->previous.carried_continuations,
-                                      _mm_setr_epi8(9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
-                                                    9, 9, 9, 9, 9, 1)),
-                      this->has_error);
-    } else {
-      // it is not ascii so we have to do heavy work
-      this->previous =
-          check_utf8_bytes(in.v2, &(this->previous), &(this->has_error));
-      this->previous =
-          check_utf8_bytes(in.v3, &(this->previous), &(this->has_error));
+      in.each([&](auto _in) {
+        this->previous = check_utf8_bytes(_in, &(this->previous), &(this->has_error));
+      });
     }
   }
 
@@ -1450,7 +1671,7 @@ struct utf8_checker<Architecture::WESTMERE> {
 
 }; // struct utf8_checker
 
-} // namespace simdjson
+} // namespace simdjson::westmere
 UNTARGET_REGION // westmere
 
 #endif // IS_X86_64
@@ -1477,7 +1698,7 @@ really_inline uint64_t compute_quote_mask(uint64_t quote_bits) {
 }
 
 really_inline void find_whitespace_and_structurals(
-    simd_input<ARCHITECTURE> in, uint64_t &whitespace,
+    simd_input64 in, uint64_t &whitespace,
     uint64_t &structurals) {
   const uint8x16_t low_nibble_mask =
       (uint8x16_t){16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0};
@@ -1485,7 +1706,7 @@ really_inline void find_whitespace_and_structurals(
       (uint8x16_t){8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0};
   const uint8x16_t low_nib_and_mask = vmovq_n_u8(0xf);
 
-  simd_input<ARCHITECTURE> v = in.map([&](auto chunk) {
+  auto v = in.map([&](auto chunk) {
     uint8x16_t nib_lo = vandq_u8(chunk, low_nib_and_mask);
     uint8x16_t nib_hi = vshrq_n_u8(chunk, 4);
     uint8x16_t shuf_lo = vqtbl1q_u8(low_nibble_mask, nib_lo);
@@ -1494,14 +1715,14 @@ really_inline void find_whitespace_and_structurals(
   });
 
   const uint8x16_t structural_shufti_mask = vmovq_n_u8(0x7);
-  structurals = v.build_bitmask([&](auto chunk) {
-    return vtstq_u8(chunk, structural_shufti_mask);
-  });
+  structurals = v.map([&](auto _v) {
+    return vtstq_u8(_v, structural_shufti_mask);
+  }).to_bitmask();
 
   const uint8x16_t whitespace_shufti_mask = vmovq_n_u8(0x18);
-  whitespace = v.build_bitmask([&](auto chunk) {
-    return vtstq_u8(chunk, whitespace_shufti_mask);
-  });
+  whitespace = v.map([&](auto _v) {
+    return vtstq_u8(_v, whitespace_shufti_mask);
+  }).to_bitmask();
 }
 
 // This file contains a non-architecture-specific version of "flatten" used in stage1.
@@ -1608,7 +1829,7 @@ really_inline void flatten_bits(uint32_t *base_ptr, uint32_t &base, uint32_t idx
 // backslashes, which modifies our subsequent search for odd-length
 // sequences of backslashes in an obvious way.
 really_inline uint64_t find_odd_backslash_sequences(
-    simd_input<ARCHITECTURE> in,
+    simd_input64 in,
     uint64_t &prev_iter_ends_odd_backslash) {
   const uint64_t even_bits = 0x5555555555555555ULL;
   const uint64_t odd_bits = ~even_bits;
@@ -1655,7 +1876,7 @@ really_inline uint64_t find_odd_backslash_sequences(
 // sequences outside quotes; these
 // backslash sequences (of any length) will be detected elsewhere.
 really_inline uint64_t find_quote_mask_and_bits(
-    simd_input<ARCHITECTURE> in, uint64_t odd_ends,
+    simd_input64 in, uint64_t odd_ends,
     uint64_t &prev_iter_inside_quote, uint64_t &quote_bits,
     uint64_t &error_mask) {
   quote_bits = in.eq('"');
@@ -1710,37 +1931,54 @@ really_inline uint64_t finalize_structurals(
   return structurals;
 }
 
-// Find structural bits in a 64-byte chunk.
-really_inline void find_structural_bits_64(
-    const uint8_t *buf, size_t idx, uint32_t *base_ptr, uint32_t &base,
+// Find structural bits in an input chunk.
+really_inline void find_structural_bits(
+    simd_input64 in, size_t &idx, uint32_t *base_ptr, uint32_t &base,
     uint64_t &prev_iter_ends_odd_backslash, uint64_t &prev_iter_inside_quote,
     uint64_t &prev_iter_ends_pseudo_pred, uint64_t &structurals,
     uint64_t &error_mask,
-    utf8_checker<ARCHITECTURE> &utf8_state) {
-  simd_input<ARCHITECTURE> in(buf);
-  utf8_state.check_next_input(in);
-  /* detect odd sequences of backslashes */
-  uint64_t odd_ends = find_odd_backslash_sequences(
-      in, prev_iter_ends_odd_backslash);
+    utf8_checker &utf8_state) {
+    utf8_state.check_next_input(in);
+    /* detect odd sequences of backslashes */
+    uint64_t odd_ends = find_odd_backslash_sequences(
+        in, prev_iter_ends_odd_backslash);
 
-  /* detect insides of quote pairs ("quote_mask") and also our quote_bits
-   * themselves */
-  uint64_t quote_bits;
-  uint64_t quote_mask = find_quote_mask_and_bits(
-      in, odd_ends, prev_iter_inside_quote, quote_bits, error_mask);
+    /* detect insides of quote pairs ("quote_mask") and also our quote_bits
+    * themselves */
+    uint64_t quote_bits;
+    uint64_t quote_mask = find_quote_mask_and_bits(
+        in, odd_ends, prev_iter_inside_quote, quote_bits, error_mask);
 
-  /* take the previous iterations structural bits, not our current
-   * iteration,
-   * and flatten */
-  flatten_bits(base_ptr, base, idx, structurals);
+    /* take the previous iterations structural bits, not our current
+    * iteration,
+    * and flatten */
+    flatten_bits(base_ptr, base, idx, structurals);
 
-  uint64_t whitespace;
-  find_whitespace_and_structurals(in, whitespace, structurals);
+    uint64_t whitespace;
+    find_whitespace_and_structurals(in, whitespace, structurals);
 
-  /* fixup structurals to reflect quotes and add pseudo-structural
-   * characters */
-  structurals = finalize_structurals(structurals, whitespace, quote_mask,
-                                     quote_bits, prev_iter_ends_pseudo_pred);
+    /* fixup structurals to reflect quotes and add pseudo-structural
+    * characters */
+    structurals = finalize_structurals(structurals, whitespace, quote_mask,
+                                      quote_bits, prev_iter_ends_pseudo_pred);
+
+    idx += 64;
+}
+
+really_inline void find_structural_bits(
+    simd_input in, size_t &idx, uint32_t *base_ptr, uint32_t &base,
+    uint64_t &prev_iter_ends_odd_backslash, uint64_t &prev_iter_inside_quote,
+    uint64_t &prev_iter_ends_pseudo_pred, uint64_t &structurals,
+    uint64_t &error_mask,
+    utf8_checker &utf8_state) {
+    in.each64([&](auto in64) {
+      find_structural_bits(in64, idx, base_ptr, base,
+        prev_iter_ends_odd_backslash, prev_iter_inside_quote,
+        prev_iter_ends_pseudo_pred, structurals,
+        error_mask,
+        utf8_state
+      );
+    });
 }
 
 int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &pj) {
@@ -1752,10 +1990,10 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
   }
   uint32_t *base_ptr = pj.structural_indexes;
   uint32_t base = 0;
-  utf8_checker<ARCHITECTURE> utf8_state;
+  utf8_checker utf8_state;
 
-  /* we have padded the input out to 64 byte multiple with the remainder
-   * being zeros persistent state across loop does the last iteration end
+  /* we have padded the input out to CHUNK_SIZE (e.g. 64) multiple with the
+   * remainder being zeros persistent state across loop does the last iteration end
    * with an odd-length sequence of backslashes? */
 
   /* either 0 or 1, but a 64-bit value */
@@ -1779,29 +2017,27 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
    * expensive carryless multiply in the previous step with this work */
   uint64_t structurals = 0;
 
-  size_t lenminus64 = len < 64 ? 0 : len - 64;
+  size_t last_chunk_idx = len < simd_input::SIZE ? 0 : len - simd_input::SIZE;
   size_t idx = 0;
   uint64_t error_mask = 0; /* for unescaped characters within strings (ASCII
                               code points < 0x20) */
 
-  for (; idx < lenminus64; idx += 64) {
-    find_structural_bits_64(&buf[idx], idx, base_ptr, base,
-                            prev_iter_ends_odd_backslash,
-                            prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
-                            structurals, error_mask, utf8_state);
+  while (idx < last_chunk_idx) {
+    find_structural_bits(simd_input(&buf[idx]), idx, base_ptr, base,
+                         prev_iter_ends_odd_backslash,
+                         prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
+                         structurals, error_mask, utf8_state);
   }
-  /* If we have a final chunk of less than 64 bytes, pad it to 64 with
-   * spaces  before processing it (otherwise, we risk invalidating the UTF-8
-   * checks). */
+  /* If we have a final chunk of less than CHUNK_SIZE bytes, pad it with spaces
+   * before processing it (otherwise, we risk invalidating the UTF-8 checks). */
   if (idx < len) {
-    uint8_t tmp_buf[64];
-    memset(tmp_buf, 0x20, 64);
+    uint8_t tmp_buf[simd_input::SIZE];
+    memset(tmp_buf, 0x20, simd_input::SIZE);
     memcpy(tmp_buf, buf + idx, len - idx);
-    find_structural_bits_64(&tmp_buf[0], idx, base_ptr, base,
-                            prev_iter_ends_odd_backslash,
-                            prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
-                            structurals, error_mask, utf8_state);
-    idx += 64;
+    find_structural_bits(simd_input(&tmp_buf[0]), idx, base_ptr, base,
+                         prev_iter_ends_odd_backslash,
+                         prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
+                         structurals, error_mask, utf8_state);
   }
 
   /* is last string quote closed? */
@@ -1868,7 +2104,7 @@ really_inline uint64_t compute_quote_mask(uint64_t quote_bits) {
   return quote_mask;
 }
 
-really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
+really_inline void find_whitespace_and_structurals(simd_input64 in,
   uint64_t &whitespace, uint64_t &structurals) {
 
   #ifdef SIMDJSON_NAIVE_STRUCTURAL
@@ -1881,7 +2117,7 @@ really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
     const __m256i mask_close_bracket = _mm256_set1_epi8(0x5d);
     const __m256i mask_column = _mm256_set1_epi8(0x3a);
     const __m256i mask_comma = _mm256_set1_epi8(0x2c);
-    structurals = in->build_bitmask([&](auto in) {
+    structurals = in.map([&](auto in) {
       __m256i structurals = _mm256_cmpeq_epi8(in, mask_open_brace);
       structurals = _mm256_or_si256(structurals, _mm256_cmpeq_epi8(in, mask_close_brace));
       structurals = _mm256_or_si256(structurals, _mm256_cmpeq_epi8(in, mask_open_bracket));
@@ -1889,18 +2125,19 @@ really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
       structurals = _mm256_or_si256(structurals, _mm256_cmpeq_epi8(in, mask_column));
       structurals = _mm256_or_si256(structurals, _mm256_cmpeq_epi8(in, mask_comma));
       return structurals;
-    });
+    }).to_bitmask();
 
     const __m256i mask_space = _mm256_set1_epi8(0x20);
     const __m256i mask_linefeed = _mm256_set1_epi8(0x0a);
     const __m256i mask_tab = _mm256_set1_epi8(0x09);
     const __m256i mask_carriage = _mm256_set1_epi8(0x0d);
-    whitespace = in->build_bitmask([&](auto in) {
+    whitespace = in.map([&](auto in) {
       __m256i space = _mm256_cmpeq_epi8(in, mask_space);
       space = _mm256_or_si256(space, _mm256_cmpeq_epi8(in, mask_linefeed));
       space = _mm256_or_si256(space, _mm256_cmpeq_epi8(in, mask_tab));
       space = _mm256_or_si256(space, _mm256_cmpeq_epi8(in, mask_carriage));
-    });
+      return space;
+    }).to_bitmask();
     // end of naive approach
 
   #else  // SIMDJSON_NAIVE_STRUCTURAL
@@ -1908,7 +2145,7 @@ really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
     // clang-format off
     const __m256i structural_table =
         _mm256_setr_epi8(44, 125, 0, 0, 0xc0u, 0, 0, 0, 0, 0, 0, 0, 0, 0, 58, 123,
-                          44, 125, 0, 0, 0xc0u, 0, 0, 0, 0, 0, 0, 0, 0, 0, 58, 123);
+                         44, 125, 0, 0, 0xc0u, 0, 0, 0, 0, 0, 0, 0, 0, 0, 58, 123);
     const __m256i white_table = _mm256_setr_epi8(
         32, 100, 100, 100, 17, 100, 113, 2, 100, 9, 10, 112, 100, 13, 100, 100,
         32, 100, 100, 100, 17, 100, 113, 2, 100, 9, 10, 112, 100, 13, 100, 100);
@@ -1916,15 +2153,16 @@ really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
     const __m256i struct_offset = _mm256_set1_epi8(0xd4u);
     const __m256i struct_mask = _mm256_set1_epi8(32);
 
-    whitespace = in.build_bitmask([&](auto chunk) {
-        return _mm256_cmpeq_epi8(chunk, _mm256_shuffle_epi8(white_table, chunk));
-    });
-    structurals = in.build_bitmask([&](auto chunk) {
-      __m256i struct_r1 = _mm256_add_epi8(struct_offset, chunk);
-      __m256i struct_r2 = _mm256_or_si256(chunk, struct_mask);
-      __m256i struct_r3 = _mm256_shuffle_epi8(structural_table, struct_r1);
-      return _mm256_cmpeq_epi8(struct_r2, struct_r3);
-    });
+    whitespace = in.map([&](auto _in) {
+      return _mm256_cmpeq_epi8(_in, _mm256_shuffle_epi8(white_table, _in));
+    }).to_bitmask();
+
+    structurals = in.map([&](auto _in) {
+      const __m256i r1 = _mm256_add_epi8(struct_offset, _in);
+      const __m256i r2 = _mm256_or_si256(_in, struct_mask);
+      const __m256i r3 = _mm256_shuffle_epi8(structural_table, r1);
+      return _mm256_cmpeq_epi8(r2, r3);
+    }).to_bitmask();
 
   #endif // else SIMDJSON_NAIVE_STRUCTURAL
 }
@@ -2010,7 +2248,7 @@ really_inline void flatten_bits(uint32_t *base_ptr, uint32_t &base, uint32_t idx
 // backslashes, which modifies our subsequent search for odd-length
 // sequences of backslashes in an obvious way.
 really_inline uint64_t find_odd_backslash_sequences(
-    simd_input<ARCHITECTURE> in,
+    simd_input64 in,
     uint64_t &prev_iter_ends_odd_backslash) {
   const uint64_t even_bits = 0x5555555555555555ULL;
   const uint64_t odd_bits = ~even_bits;
@@ -2057,7 +2295,7 @@ really_inline uint64_t find_odd_backslash_sequences(
 // sequences outside quotes; these
 // backslash sequences (of any length) will be detected elsewhere.
 really_inline uint64_t find_quote_mask_and_bits(
-    simd_input<ARCHITECTURE> in, uint64_t odd_ends,
+    simd_input64 in, uint64_t odd_ends,
     uint64_t &prev_iter_inside_quote, uint64_t &quote_bits,
     uint64_t &error_mask) {
   quote_bits = in.eq('"');
@@ -2112,37 +2350,54 @@ really_inline uint64_t finalize_structurals(
   return structurals;
 }
 
-// Find structural bits in a 64-byte chunk.
-really_inline void find_structural_bits_64(
-    const uint8_t *buf, size_t idx, uint32_t *base_ptr, uint32_t &base,
+// Find structural bits in an input chunk.
+really_inline void find_structural_bits(
+    simd_input64 in, size_t &idx, uint32_t *base_ptr, uint32_t &base,
     uint64_t &prev_iter_ends_odd_backslash, uint64_t &prev_iter_inside_quote,
     uint64_t &prev_iter_ends_pseudo_pred, uint64_t &structurals,
     uint64_t &error_mask,
-    utf8_checker<ARCHITECTURE> &utf8_state) {
-  simd_input<ARCHITECTURE> in(buf);
-  utf8_state.check_next_input(in);
-  /* detect odd sequences of backslashes */
-  uint64_t odd_ends = find_odd_backslash_sequences(
-      in, prev_iter_ends_odd_backslash);
+    utf8_checker &utf8_state) {
+    utf8_state.check_next_input(in);
+    /* detect odd sequences of backslashes */
+    uint64_t odd_ends = find_odd_backslash_sequences(
+        in, prev_iter_ends_odd_backslash);
 
-  /* detect insides of quote pairs ("quote_mask") and also our quote_bits
-   * themselves */
-  uint64_t quote_bits;
-  uint64_t quote_mask = find_quote_mask_and_bits(
-      in, odd_ends, prev_iter_inside_quote, quote_bits, error_mask);
+    /* detect insides of quote pairs ("quote_mask") and also our quote_bits
+    * themselves */
+    uint64_t quote_bits;
+    uint64_t quote_mask = find_quote_mask_and_bits(
+        in, odd_ends, prev_iter_inside_quote, quote_bits, error_mask);
 
-  /* take the previous iterations structural bits, not our current
-   * iteration,
-   * and flatten */
-  flatten_bits(base_ptr, base, idx, structurals);
+    /* take the previous iterations structural bits, not our current
+    * iteration,
+    * and flatten */
+    flatten_bits(base_ptr, base, idx, structurals);
 
-  uint64_t whitespace;
-  find_whitespace_and_structurals(in, whitespace, structurals);
+    uint64_t whitespace;
+    find_whitespace_and_structurals(in, whitespace, structurals);
 
-  /* fixup structurals to reflect quotes and add pseudo-structural
-   * characters */
-  structurals = finalize_structurals(structurals, whitespace, quote_mask,
-                                     quote_bits, prev_iter_ends_pseudo_pred);
+    /* fixup structurals to reflect quotes and add pseudo-structural
+    * characters */
+    structurals = finalize_structurals(structurals, whitespace, quote_mask,
+                                      quote_bits, prev_iter_ends_pseudo_pred);
+
+    idx += 64;
+}
+
+really_inline void find_structural_bits(
+    simd_input in, size_t &idx, uint32_t *base_ptr, uint32_t &base,
+    uint64_t &prev_iter_ends_odd_backslash, uint64_t &prev_iter_inside_quote,
+    uint64_t &prev_iter_ends_pseudo_pred, uint64_t &structurals,
+    uint64_t &error_mask,
+    utf8_checker &utf8_state) {
+    in.each64([&](auto in64) {
+      find_structural_bits(in64, idx, base_ptr, base,
+        prev_iter_ends_odd_backslash, prev_iter_inside_quote,
+        prev_iter_ends_pseudo_pred, structurals,
+        error_mask,
+        utf8_state
+      );
+    });
 }
 
 int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &pj) {
@@ -2154,10 +2409,10 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
   }
   uint32_t *base_ptr = pj.structural_indexes;
   uint32_t base = 0;
-  utf8_checker<ARCHITECTURE> utf8_state;
+  utf8_checker utf8_state;
 
-  /* we have padded the input out to 64 byte multiple with the remainder
-   * being zeros persistent state across loop does the last iteration end
+  /* we have padded the input out to CHUNK_SIZE (e.g. 64) multiple with the
+   * remainder being zeros persistent state across loop does the last iteration end
    * with an odd-length sequence of backslashes? */
 
   /* either 0 or 1, but a 64-bit value */
@@ -2181,29 +2436,27 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
    * expensive carryless multiply in the previous step with this work */
   uint64_t structurals = 0;
 
-  size_t lenminus64 = len < 64 ? 0 : len - 64;
+  size_t last_chunk_idx = len < simd_input::SIZE ? 0 : len - simd_input::SIZE;
   size_t idx = 0;
   uint64_t error_mask = 0; /* for unescaped characters within strings (ASCII
                               code points < 0x20) */
 
-  for (; idx < lenminus64; idx += 64) {
-    find_structural_bits_64(&buf[idx], idx, base_ptr, base,
-                            prev_iter_ends_odd_backslash,
-                            prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
-                            structurals, error_mask, utf8_state);
+  while (idx < last_chunk_idx) {
+    find_structural_bits(simd_input(&buf[idx]), idx, base_ptr, base,
+                         prev_iter_ends_odd_backslash,
+                         prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
+                         structurals, error_mask, utf8_state);
   }
-  /* If we have a final chunk of less than 64 bytes, pad it to 64 with
-   * spaces  before processing it (otherwise, we risk invalidating the UTF-8
-   * checks). */
+  /* If we have a final chunk of less than CHUNK_SIZE bytes, pad it with spaces
+   * before processing it (otherwise, we risk invalidating the UTF-8 checks). */
   if (idx < len) {
-    uint8_t tmp_buf[64];
-    memset(tmp_buf, 0x20, 64);
+    uint8_t tmp_buf[simd_input::SIZE];
+    memset(tmp_buf, 0x20, simd_input::SIZE);
     memcpy(tmp_buf, buf + idx, len - idx);
-    find_structural_bits_64(&tmp_buf[0], idx, base_ptr, base,
-                            prev_iter_ends_odd_backslash,
-                            prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
-                            structurals, error_mask, utf8_state);
-    idx += 64;
+    find_structural_bits(simd_input(&tmp_buf[0]), idx, base_ptr, base,
+                         prev_iter_ends_odd_backslash,
+                         prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
+                         structurals, error_mask, utf8_state);
   }
 
   /* is last string quote closed? */
@@ -2270,26 +2523,26 @@ really_inline uint64_t compute_quote_mask(uint64_t quote_bits) {
       _mm_set_epi64x(0ULL, quote_bits), _mm_set1_epi8(0xFFu), 0));
 }
 
-really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
+really_inline void find_whitespace_and_structurals(simd_input64 in,
   uint64_t &whitespace, uint64_t &structurals) {
 
   const __m128i structural_table =
       _mm_setr_epi8(44, 125, 0, 0, 0xc0u, 0, 0, 0, 0, 0, 0, 0, 0, 0, 58, 123);
-  const __m128i white_table = _mm_setr_epi8(32, 100, 100, 100, 17, 100, 113, 2,
-                                              100, 9, 10, 112, 100, 13, 100, 100);
+  const __m128i white_table = _mm_setr_epi8(32, 100, 100, 100,  17, 100, 113,   2,
+                                           100,   9,  10, 112, 100,  13, 100, 100);
   const __m128i struct_offset = _mm_set1_epi8(0xd4u);
   const __m128i struct_mask = _mm_set1_epi8(32);
 
-  whitespace = in.build_bitmask([&](auto chunk) {
-      return _mm_cmpeq_epi8(chunk, _mm_shuffle_epi8(white_table, chunk));
-  });
+  whitespace = in.map([&](auto _in) {
+    return _mm_cmpeq_epi8(_in, _mm_shuffle_epi8(white_table, _in));
+  }).to_bitmask();
 
-  structurals = in.build_bitmask([&](auto chunk) {
-    __m128i struct_r1 = _mm_add_epi8(struct_offset, chunk);
-    __m128i struct_r2 = _mm_or_si128(chunk, struct_mask);
-    __m128i struct_r3 = _mm_shuffle_epi8(structural_table, struct_r1);
-    return _mm_cmpeq_epi8(struct_r2, struct_r3);
-  });
+  structurals = in.map([&](auto _in) {
+    const __m128i r1 = _mm_add_epi8(struct_offset, _in);
+    const __m128i r2 = _mm_or_si128(_in, struct_mask);
+    const __m128i r3 = _mm_shuffle_epi8(structural_table, r1);
+    return _mm_cmpeq_epi8(r2, r3);
+  }).to_bitmask();
 }
 
 // This file contains a non-architecture-specific version of "flatten" used in stage1.
@@ -2396,7 +2649,7 @@ really_inline void flatten_bits(uint32_t *base_ptr, uint32_t &base, uint32_t idx
 // backslashes, which modifies our subsequent search for odd-length
 // sequences of backslashes in an obvious way.
 really_inline uint64_t find_odd_backslash_sequences(
-    simd_input<ARCHITECTURE> in,
+    simd_input64 in,
     uint64_t &prev_iter_ends_odd_backslash) {
   const uint64_t even_bits = 0x5555555555555555ULL;
   const uint64_t odd_bits = ~even_bits;
@@ -2443,7 +2696,7 @@ really_inline uint64_t find_odd_backslash_sequences(
 // sequences outside quotes; these
 // backslash sequences (of any length) will be detected elsewhere.
 really_inline uint64_t find_quote_mask_and_bits(
-    simd_input<ARCHITECTURE> in, uint64_t odd_ends,
+    simd_input64 in, uint64_t odd_ends,
     uint64_t &prev_iter_inside_quote, uint64_t &quote_bits,
     uint64_t &error_mask) {
   quote_bits = in.eq('"');
@@ -2498,37 +2751,54 @@ really_inline uint64_t finalize_structurals(
   return structurals;
 }
 
-// Find structural bits in a 64-byte chunk.
-really_inline void find_structural_bits_64(
-    const uint8_t *buf, size_t idx, uint32_t *base_ptr, uint32_t &base,
+// Find structural bits in an input chunk.
+really_inline void find_structural_bits(
+    simd_input64 in, size_t &idx, uint32_t *base_ptr, uint32_t &base,
     uint64_t &prev_iter_ends_odd_backslash, uint64_t &prev_iter_inside_quote,
     uint64_t &prev_iter_ends_pseudo_pred, uint64_t &structurals,
     uint64_t &error_mask,
-    utf8_checker<ARCHITECTURE> &utf8_state) {
-  simd_input<ARCHITECTURE> in(buf);
-  utf8_state.check_next_input(in);
-  /* detect odd sequences of backslashes */
-  uint64_t odd_ends = find_odd_backslash_sequences(
-      in, prev_iter_ends_odd_backslash);
+    utf8_checker &utf8_state) {
+    utf8_state.check_next_input(in);
+    /* detect odd sequences of backslashes */
+    uint64_t odd_ends = find_odd_backslash_sequences(
+        in, prev_iter_ends_odd_backslash);
 
-  /* detect insides of quote pairs ("quote_mask") and also our quote_bits
-   * themselves */
-  uint64_t quote_bits;
-  uint64_t quote_mask = find_quote_mask_and_bits(
-      in, odd_ends, prev_iter_inside_quote, quote_bits, error_mask);
+    /* detect insides of quote pairs ("quote_mask") and also our quote_bits
+    * themselves */
+    uint64_t quote_bits;
+    uint64_t quote_mask = find_quote_mask_and_bits(
+        in, odd_ends, prev_iter_inside_quote, quote_bits, error_mask);
 
-  /* take the previous iterations structural bits, not our current
-   * iteration,
-   * and flatten */
-  flatten_bits(base_ptr, base, idx, structurals);
+    /* take the previous iterations structural bits, not our current
+    * iteration,
+    * and flatten */
+    flatten_bits(base_ptr, base, idx, structurals);
 
-  uint64_t whitespace;
-  find_whitespace_and_structurals(in, whitespace, structurals);
+    uint64_t whitespace;
+    find_whitespace_and_structurals(in, whitespace, structurals);
 
-  /* fixup structurals to reflect quotes and add pseudo-structural
-   * characters */
-  structurals = finalize_structurals(structurals, whitespace, quote_mask,
-                                     quote_bits, prev_iter_ends_pseudo_pred);
+    /* fixup structurals to reflect quotes and add pseudo-structural
+    * characters */
+    structurals = finalize_structurals(structurals, whitespace, quote_mask,
+                                      quote_bits, prev_iter_ends_pseudo_pred);
+
+    idx += 64;
+}
+
+really_inline void find_structural_bits(
+    simd_input in, size_t &idx, uint32_t *base_ptr, uint32_t &base,
+    uint64_t &prev_iter_ends_odd_backslash, uint64_t &prev_iter_inside_quote,
+    uint64_t &prev_iter_ends_pseudo_pred, uint64_t &structurals,
+    uint64_t &error_mask,
+    utf8_checker &utf8_state) {
+    in.each64([&](auto in64) {
+      find_structural_bits(in64, idx, base_ptr, base,
+        prev_iter_ends_odd_backslash, prev_iter_inside_quote,
+        prev_iter_ends_pseudo_pred, structurals,
+        error_mask,
+        utf8_state
+      );
+    });
 }
 
 int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &pj) {
@@ -2540,10 +2810,10 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
   }
   uint32_t *base_ptr = pj.structural_indexes;
   uint32_t base = 0;
-  utf8_checker<ARCHITECTURE> utf8_state;
+  utf8_checker utf8_state;
 
-  /* we have padded the input out to 64 byte multiple with the remainder
-   * being zeros persistent state across loop does the last iteration end
+  /* we have padded the input out to CHUNK_SIZE (e.g. 64) multiple with the
+   * remainder being zeros persistent state across loop does the last iteration end
    * with an odd-length sequence of backslashes? */
 
   /* either 0 or 1, but a 64-bit value */
@@ -2567,29 +2837,27 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
    * expensive carryless multiply in the previous step with this work */
   uint64_t structurals = 0;
 
-  size_t lenminus64 = len < 64 ? 0 : len - 64;
+  size_t last_chunk_idx = len < simd_input::SIZE ? 0 : len - simd_input::SIZE;
   size_t idx = 0;
   uint64_t error_mask = 0; /* for unescaped characters within strings (ASCII
                               code points < 0x20) */
 
-  for (; idx < lenminus64; idx += 64) {
-    find_structural_bits_64(&buf[idx], idx, base_ptr, base,
-                            prev_iter_ends_odd_backslash,
-                            prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
-                            structurals, error_mask, utf8_state);
+  while (idx < last_chunk_idx) {
+    find_structural_bits(simd_input(&buf[idx]), idx, base_ptr, base,
+                         prev_iter_ends_odd_backslash,
+                         prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
+                         structurals, error_mask, utf8_state);
   }
-  /* If we have a final chunk of less than 64 bytes, pad it to 64 with
-   * spaces  before processing it (otherwise, we risk invalidating the UTF-8
-   * checks). */
+  /* If we have a final chunk of less than CHUNK_SIZE bytes, pad it with spaces
+   * before processing it (otherwise, we risk invalidating the UTF-8 checks). */
   if (idx < len) {
-    uint8_t tmp_buf[64];
-    memset(tmp_buf, 0x20, 64);
+    uint8_t tmp_buf[simd_input::SIZE];
+    memset(tmp_buf, 0x20, simd_input::SIZE);
     memcpy(tmp_buf, buf + idx, len - idx);
-    find_structural_bits_64(&tmp_buf[0], idx, base_ptr, base,
-                            prev_iter_ends_odd_backslash,
-                            prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
-                            structurals, error_mask, utf8_state);
-    idx += 64;
+    find_structural_bits(simd_input(&tmp_buf[0]), idx, base_ptr, base,
+                         prev_iter_ends_odd_backslash,
+                         prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
+                         structurals, error_mask, utf8_state);
   }
 
   /* is last string quote closed? */
@@ -2641,6 +2909,7 @@ UNTARGET_REGION
 #endif // SIMDJSON_WESTMERE_STAGE1_FIND_MARKS_H
 /* end file src/westmere/stage1_find_marks.h */
 /* begin file src/stage1_find_marks.cpp */
+#include <algorithm>
 
 namespace {
 // for when clmul is unavailable
@@ -4939,6 +5208,14 @@ bool ParsedJson::print_json(std::ostream &os) {
       }
       os << static_cast<int64_t>(tape[++tape_idx]);
       break;
+    case 'u':
+      if (tape_idx + 1 >= how_many) {
+        delete[] in_object;
+        delete[] in_object_idx;
+        return false;
+      }
+      os << tape[++tape_idx];
+      break;
     case 'd': // we have a double
       if (tape_idx + 1 >= how_many) {
         delete[] in_object;
@@ -5035,6 +5312,12 @@ bool ParsedJson::dump_raw_tape(std::ostream &os) {
         return false;
       }
       os << "integer " << static_cast<int64_t>(tape[++tape_idx]) << "\n";
+      break;
+    case 'u': // we have a long uint
+      if (tape_idx + 1 >= how_many) {
+        return false;
+      }
+      os << "unsigned integer " << tape[++tape_idx] << "\n";
       break;
     case 'd': // we have a double
       os << "float ";

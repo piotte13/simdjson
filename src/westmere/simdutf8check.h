@@ -2,7 +2,6 @@
 #define SIMDJSON_WESTMERE_SIMDUTF8CHECK_H
 
 #include "simdjson/portability.h"
-#include "simdutf8check.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -163,16 +162,7 @@ check_utf8_bytes(__m128i current_bytes, struct processed_utf_bytes *previous,
   return pb;
 }
 
-} // namespace simdjson::westmere
-UNTARGET_REGION
-
-TARGET_WESTMERE
-namespace simdjson {
-
-using namespace simdjson::westmere;
-
-template <>
-struct utf8_checker<Architecture::WESTMERE> {
+struct utf8_checker {
   __m128i has_error = _mm_setzero_si128();
   processed_utf_bytes previous{
       _mm_setzero_si128(), // raw_bytes
@@ -180,7 +170,7 @@ struct utf8_checker<Architecture::WESTMERE> {
       _mm_setzero_si128()  // carried_continuations
   };
 
-  really_inline void check_next_input(simd_input<Architecture::WESTMERE> in) {
+  really_inline void check_next_input(simd_input64 in) {
     __m128i high_bit = _mm_set1_epi8(0x80u);
     __m128i any_bits_on = in.reduce([&](auto a, auto b) {
       return _mm_or_si128(a, b);
@@ -208,7 +198,7 @@ struct utf8_checker<Architecture::WESTMERE> {
 
 }; // struct utf8_checker
 
-} // namespace simdjson
+} // namespace simdjson::westmere
 UNTARGET_REGION // westmere
 
 #endif // IS_X86_64

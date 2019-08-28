@@ -21,7 +21,7 @@ really_inline uint64_t compute_quote_mask(uint64_t quote_bits) {
   return quote_mask;
 }
 
-really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
+really_inline void find_whitespace_and_structurals(simd_input64 in,
   uint64_t &whitespace, uint64_t &structurals) {
 
   #ifdef SIMDJSON_NAIVE_STRUCTURAL
@@ -42,7 +42,7 @@ really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
       structurals = _mm256_or_si256(structurals, _mm256_cmpeq_epi8(in, mask_column));
       structurals = _mm256_or_si256(structurals, _mm256_cmpeq_epi8(in, mask_comma));
       return structurals;
-    }).to_bitmask();
+    });
 
     const __m256i mask_space = _mm256_set1_epi8(0x20);
     const __m256i mask_linefeed = _mm256_set1_epi8(0x0a);
@@ -54,7 +54,7 @@ really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
       space = _mm256_or_si256(space, _mm256_cmpeq_epi8(in, mask_tab));
       space = _mm256_or_si256(space, _mm256_cmpeq_epi8(in, mask_carriage));
       return space;
-    }).to_bitmask();
+    });
     // end of naive approach
 
   #else  // SIMDJSON_NAIVE_STRUCTURAL
@@ -72,14 +72,14 @@ really_inline void find_whitespace_and_structurals(simd_input<ARCHITECTURE> in,
 
     whitespace = in.map([&](auto _in) {
       return _mm256_cmpeq_epi8(_in, _mm256_shuffle_epi8(white_table, _in));
-    }).to_bitmask();
+    });
 
     structurals = in.map([&](auto _in) {
       const __m256i r1 = _mm256_add_epi8(struct_offset, _in);
       const __m256i r2 = _mm256_or_si256(_in, struct_mask);
       const __m256i r3 = _mm256_shuffle_epi8(structural_table, r1);
       return _mm256_cmpeq_epi8(r2, r3);
-    }).to_bitmask();
+    });
 
   #endif // else SIMDJSON_NAIVE_STRUCTURAL
 }
