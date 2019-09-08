@@ -117,14 +117,17 @@ really_inline uint64_t finalize_structurals(
 
 // Find structural bits in an input chunk.
 really_inline void find_structural_bits(
-    simd_input in, size_t &idx, uint32_t *base_ptr, uint32_t &base,
+    const uint8_t *in_buf, size_t &idx, uint32_t *base_ptr, uint32_t &base,
     uint64_t &prev_iter_ends_odd_backslash, uint64_t &prev_iter_inside_quote,
-    uint64_t &prev_iter_ends_pseudo_pred, uint64_t &structurals,
+    uint64_t &prev_iter_ends_pseudo_pred, uint64_t &prev_structurals,
     uint64_t &error_mask,
     utf8_checker &utf8_state) {
 
     each64([&](auto chunk) {
-      simd_input64 in64 = in.chunks[chunk];
+      simd_input64 in64(in_buf+(chunk*64));
+
+      utf8_state.check_next_input(in64);
+
       /* detect odd sequences of backslashes */
       uint64_t odd_ends = find_odd_backslash_sequences(in64, prev_iter_ends_odd_backslash);
 
@@ -134,20 +137,20 @@ really_inline void find_structural_bits(
       uint64_t quote_mask = find_quote_mask_and_bits(
           in64, odd_ends, prev_iter_inside_quote, quote_bits, error_mask);
 
+      uint64_t whitespace;
+      uint64_t structurals;
+      find_whitespace_and_structurals(in64, whitespace, structurals);
+
       /* take the previous iterations structural bits, not our current
       * iteration,
       * and flatten */
-      flatten_bits(base_ptr, base, idx, structurals);
-
-      uint64_t whitespace;
-      find_whitespace_and_structurals(in64, whitespace, structurals);
+      flatten_bits(base_ptr, base, idx, prev_structurals);
 
       /* fixup structurals to reflect quotes and add pseudo-structural
       * characters */
-      structurals = finalize_structurals(structurals, whitespace, quote_mask,
-                                         quote_bits, prev_iter_ends_pseudo_pred);
+      prev_structurals = finalize_structurals(structurals, whitespace, quote_mask,
+                                              quote_bits, prev_iter_ends_pseudo_pred);
 
-      utf8_state.check_next_input(in64);
       idx += 64;
     });
 }
@@ -194,7 +197,7 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
                               code points < 0x20) */
 
   while (idx < last_chunk_idx) {
-    find_structural_bits(simd_input(&buf[idx]), idx, base_ptr, base,
+    find_structural_bits(&buf[idx], idx, base_ptr, base,
                          prev_iter_ends_odd_backslash,
                          prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
                          structurals, error_mask, utf8_state);
@@ -205,7 +208,7 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
     uint8_t tmp_buf[SIMD_WIDTH];
     memset(tmp_buf, 0x20, SIMD_WIDTH);
     memcpy(tmp_buf, buf + idx, len - idx);
-    find_structural_bits(simd_input(&tmp_buf[0]), idx, base_ptr, base,
+    find_structural_bits(&tmp_buf[0], idx, base_ptr, base,
                          prev_iter_ends_odd_backslash,
                          prev_iter_inside_quote, prev_iter_ends_pseudo_pred,
                          structurals, error_mask, utf8_state);
