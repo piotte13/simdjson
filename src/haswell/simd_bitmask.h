@@ -14,6 +14,7 @@ namespace simdjson::haswell {
 struct simd_bitmask {
   __m256i bitmask;
 
+  really_inline simd_bitmask() { }
   really_inline simd_bitmask(__m256i _bitmask) : bitmask(_bitmask) { }
   really_inline operator __m256i() const { return this->bitmask; }
 
@@ -34,12 +35,11 @@ struct simd_bitmask {
   really_inline simd_bitmask(bitmask_array b) : simd_bitmask(_mm256_loadu_si256(reinterpret_cast<__m256i*>(b.bitmasks))) { }
   really_inline simd_bitmask(uint64_t b0, uint64_t b1, uint64_t b2, uint64_t b3) : simd_bitmask(bitmask_array(b0,b1,b2,b3)) { }
 
-  really_inline bitmask_array chunks64() const {
+  really_inline bitmask_array to_array() const {
     bitmask_array result;
     _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.bitmasks), this->bitmask);
     return result;
   }
-
 
   // Bitwise operations
   really_inline simd_bitmask operator |(const simd_bitmask other) const {
@@ -60,11 +60,26 @@ struct simd_bitmask {
   really_inline simd_bitmask ornot(const simd_bitmask other) const {
     return *this | ~other;
   }
-  really_inline bool bits_set(const simd_bitmask bits) const {
+  really_inline simd_bitmask operator |=(const simd_bitmask other) {
+    return (*this = *this | other);
+  }
+  really_inline simd_bitmask operator &=(const simd_bitmask other) {
+    return (*this = *this & other);
+  }
+  really_inline simd_bitmask operator ^=(const simd_bitmask other) {
+    return (*this = *this ^ other);
+  }
+  really_inline bool any_bits_set(const simd_bitmask bits) const {
     return _mm256_testz_si256(*this, bits) > 0;
   }
-  really_inline bool bits_not_set(const simd_bitmask bits) const {
+  really_inline bool any_bits_not_set(const simd_bitmask bits) const {
     return _mm256_testnzc_si256(*this, bits) > 0;
+  }
+  really_inline bool any_bits_set() const {
+    return this->any_bits_set(_mm256_set1_epi8(0xFF));
+  }
+  really_inline bool any_bits_not_set() const {
+    return this->any_bits_not_set(_mm256_set1_epi8(0xFF));
   }
 
   really_inline simd_bitmask prev(bool &carry) const {
@@ -83,7 +98,9 @@ struct simd_bitmask {
     return shifted | carried;
   }
 
-  // really_inline bitmask_array after_series_starting_with(bitmask_array starting_with, bool &carry) const {
+  really_inline simd_bitmask after_series_starting_with(simd_bitmask starting_with, bool &carry) const {
+    return this->to_array().after_series_starting_with(starting_with.to_array(), carry);
+  }
     // // First, add up the slots.
     // simd_bitmask added = _mm256_add_epi64(*this, preceded_by);
 

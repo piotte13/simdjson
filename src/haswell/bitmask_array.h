@@ -31,12 +31,12 @@ really_inline R map64(F const& map) {
 
 struct bitmask_array {
   uint64_t bitmasks[SIMD_WIDTH/64];
-  really_inline bitmask_array() {}
   really_inline bitmask_array(
     const uint64_t m0, const uint64_t m1, const uint64_t m2, const uint64_t m3
   ) : bitmasks{
     m0,m1,m2,m3
   } { }
+  really_inline bitmask_array() : bitmask_array(0,0,0,0) {}
   really_inline bitmask_array(
     const uint32_t m0, const uint32_t m1, const uint32_t m2, const uint32_t m3,
     const uint32_t m4, const uint32_t m5, const uint32_t m6, const uint32_t m7
@@ -46,6 +46,7 @@ struct bitmask_array {
   } { }
 
   really_inline uint64_t operator[](const size_t index) const { return this->bitmasks[index]; }
+  really_inline uint64_t& operator[](const size_t index) { return this->bitmasks[index]; }
   static constexpr void assert_is_chunks64() { }
 
   template<typename F>
@@ -76,6 +77,7 @@ struct bitmask_array {
     return this->map(starting_with, [&](uint64_t series_bitmask, uint64_t starting_with_bitmask) {
       uint64_t result;
       carry = add_overflow(series_bitmask, starting_with_bitmask | carry, &result);
+      result &= ~series_bitmask;
       return result;
     });
   }

@@ -10,9 +10,15 @@
 
 namespace simdjson::arm64 {
 
+simd_bitmask splat_u8 (uint8_t value) { return vmovq_n_u8(value); }
+simd_bitmask splat_u16(uint16_t value) { return vmovq_n_u16(value); }
+simd_bitmask splat_u32(uint32_t value) { return vmovq_n_u32(value); }
+simd_bitmask splat_u64(uint64_t value) { return vmovq_n_u64(value); }
+
 struct simd_bitmask {
   uint64x2_t bitmask;
 
+  really_inline simd_bitmask() { }
   really_inline simd_bitmask(uint64x2_t _bitmask) : bitmask(_bitmask) { }
   really_inline operator uint64x2_t() const { return this->bitmask; }
 
@@ -51,7 +57,7 @@ struct simd_bitmask {
   }
   really_inline simd_bitmask(uint64_t b0, uint64_t b1) : simd_bitmask(bitmask_array(b0,b1)) { }
 
-  really_inline bitmask_array chunks64() const {
+  really_inline bitmask_array to_array() const {
     bitmask_array result;
     vld1q_u64(result.bitmasks, this->bitmask);
     return result;
@@ -76,9 +82,21 @@ struct simd_bitmask {
   really_inline simd_bitmask andnot(const simd_bitmask &other) const {
     return *this & ~other;
   }
+  really_inline simd_bitmask operator |=(const simd_bitmask other) {
+    return (*this = *this | other);
+  }
+  really_inline simd_bitmask operator &=(const simd_bitmask other) {
+    return (*this = *this & other);
+  }
+  really_inline simd_bitmask operator ^=(const simd_bitmask other) {
+    return (*this = *this ^ other);
+  }
 
-  really_inline bitmask_array prev(bool &carry) const {
-    return bitmask_array(*this).prev(carry);
+  really_inline simd_bitmask prev(bool &carry) const {
+    return this->to_array().prev(carry);
+  }
+  really_inline simd_bitmask after_series_starting_with(simd_bitmask starting_with, bool &carry) const {
+    return this->to_array().after_series_starting_with(starting_with.to_array(), carry);
   }
 }
 
