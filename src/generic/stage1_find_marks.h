@@ -14,7 +14,7 @@
 // sequences of backslashes in an obvious way.
 really_inline uint64_t find_odd_backslash_sequences(
     uint64_t bs_bits,
-    uint64_t &prev_iter_ends_odd_backslash) {
+    bool &prev_iter_ends_odd_backslash) {
   const uint64_t even_bits = 0x5555555555555555ULL;
   const uint64_t odd_bits = ~even_bits;
   uint64_t start_edges = bs_bits & ~(bs_bits << 1);
@@ -37,7 +37,7 @@ really_inline uint64_t find_odd_backslash_sequences(
                                                 * odd-numbered run at the
                                                 * end of the previous
                                                 * iteration */
-  prev_iter_ends_odd_backslash = iter_ends_odd_backslash ? 0x1ULL : 0x0ULL;
+  prev_iter_ends_odd_backslash = iter_ends_odd_backslash != 0;
   uint64_t even_carry_ends = even_carries & ~bs_bits;
   uint64_t odd_carry_ends = odd_carries & ~bs_bits;
   uint64_t even_start_odd_end = even_carry_ends & odd_bits;
@@ -76,7 +76,7 @@ really_inline uint64_t find_quote_mask_and_bits(
 
 really_inline uint64_t finalize_structurals(
     uint64_t structurals, uint64_t whitespace, uint64_t quote_mask,
-    uint64_t quote_bits, uint64_t &prev_iter_ends_pseudo_pred) {
+    uint64_t quote_bits, bool &prev_iter_ends_pseudo_pred) {
   // mask off anything inside quotes
   structurals &= ~quote_mask;
   // add the real quote bits back into our bit_mask as well, so we can
@@ -96,7 +96,7 @@ really_inline uint64_t finalize_structurals(
 
   uint64_t shifted_pseudo_pred =
       (pseudo_pred << 1) | prev_iter_ends_pseudo_pred;
-  prev_iter_ends_pseudo_pred = pseudo_pred >> 63;
+  prev_iter_ends_pseudo_pred = (pseudo_pred >> 63) != 0;
   uint64_t pseudo_structurals =
       shifted_pseudo_pred & (~whitespace) & (~quote_mask);
   structurals |= pseudo_structurals;
@@ -110,42 +110,47 @@ really_inline uint64_t finalize_structurals(
 // Find structural bits in an input chunk.
 really_inline void find_structural_bits(
     const uint8_t *in_buf, size_t &idx, uint32_t *base_ptr, uint32_t &base,
-    uint64_t &prev_iter_ends_odd_backslash, uint64_t &prev_iter_inside_quote,
-    uint64_t &prev_iter_ends_pseudo_pred, uint64_t &prev_structurals,
+    bool &prev_iter_ends_odd_backslash, uint64_t &prev_iter_inside_quote,
+    bool &prev_iter_ends_pseudo_pred, uint64_t &prev_structurals,
     uint64_t &error_mask,
     utf8_checker &utf8_state) {
 
-    bitmask_array bs_bits_array;
-    bitmask_array quote_bits_array;
-    bitmask_array unescaped_array;
-    bitmask_array whitespace_array;
-    bitmask_array structurals_array;
-    each64([&](auto chunk) {
+    each64([&](size_t chunk) {
       simd_input64 in64(in_buf+(chunk*64));
       utf8_state.check_next_input(in64);
-      bs_bits_array[chunk] = in64.eq('\\');
-      quote_bits_array[chunk] = in64.eq('"');
+    });
+
+    bitmask_array odd_ends = map64([&](size_t chunk) {
+      simd_input64 in64(in_buf+(chunk*64));
+      /* detect odd sequences of backslashes */
+      return find_odd_backslash_sequences(in64.eq('\\'), prev_iter_ends_odd_backslash);
+    });
+
+    bitmask_array quote_bits;
+    bitmask_array quote_mask = map64([&](size_t chunk) {
+      simd_input64 in64(in_buf+(chunk*64));
+
+      /* detect insides of quote pairs ("quote_mask") and also our quote_bits
+      * themselves */
+      quote_bits[chunk] = in64.eq('"');
       /* All Unicode characters may be placed within the
       * quotation marks, except for the characters that MUST be escaped:
       * quotation mark, reverse solidus, and the control characters (U+0000
       * through U+001F).
       * https://tools.ietf.org/html/rfc8259 */
-      unescaped_array[chunk] = in64.lteq(0x1F);
-      find_whitespace_and_structurals(in64, whitespace_array[chunk], structurals_array[chunk]);
+      uint64_t unescaped = in64.lteq(0x1F);
+      return find_quote_mask_and_bits(
+          unescaped, odd_ends[chunk], prev_iter_inside_quote, quote_bits[chunk], error_mask);
     });
 
-    each64([&](auto chunk) {
-      uint64_t bs_bits = bs_bits_array[chunk];
-      /* detect odd sequences of backslashes */
-      uint64_t odd_ends = find_odd_backslash_sequences(bs_bits, prev_iter_ends_odd_backslash);
+    bitmask_array whitespace;
+    bitmask_array structurals;
+    each64([&](uint64_t chunk) {
+      simd_input64 in64(in_buf+(chunk*64));
+      find_whitespace_and_structurals(in64, whitespace[chunk], structurals[chunk]);
+    });
 
-      /* detect insides of quote pairs ("quote_mask") and also our quote_bits
-      * themselves */
-      uint64_t quote_bits = quote_bits_array[chunk];
-      uint64_t unescaped = unescaped_array[chunk];
-      uint64_t quote_mask = find_quote_mask_and_bits(
-          unescaped, odd_ends, prev_iter_inside_quote, quote_bits, error_mask);
-
+    each64([&](uint64_t chunk) {
       /* take the previous iterations structural bits, not our current
       * iteration,
       * and flatten */
@@ -153,10 +158,8 @@ really_inline void find_structural_bits(
 
       /* fixup structurals to reflect quotes and add pseudo-structural
       * characters */
-      uint64_t whitespace = whitespace_array[chunk];
-      uint64_t structurals = structurals_array[chunk];
-      prev_structurals = finalize_structurals(structurals, whitespace, quote_mask,
-                                              quote_bits, prev_iter_ends_pseudo_pred);
+      prev_structurals = finalize_structurals(structurals[chunk], whitespace[chunk], quote_mask[chunk],
+                                              quote_bits[chunk], prev_iter_ends_pseudo_pred);
 
       idx += 64;
     });
@@ -177,8 +180,7 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
    * remainder being zeros persistent state across loop does the last iteration end
    * with an odd-length sequence of backslashes? */
 
-  /* either 0 or 1, but a 64-bit value */
-  uint64_t prev_iter_ends_odd_backslash = 0ULL;
+  bool prev_iter_ends_odd_backslash = false;
   /* does the previous iteration end inside a double-quote pair? */
   uint64_t prev_iter_inside_quote =
       0ULL; /* either all zeros or all ones
@@ -188,7 +190,7 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
              * first char is considered to follow "whitespace" for the
              * purposes of pseudo-structural character detection so we
              * initialize to 1 */
-  uint64_t prev_iter_ends_pseudo_pred = 1ULL;
+  bool prev_iter_ends_pseudo_pred = true;
 
   /* structurals are persistent state across loop as we flatten them on the
    * subsequent iteration into our array pointed to be base_ptr.

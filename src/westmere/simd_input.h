@@ -84,6 +84,15 @@ struct simd_input64 {
 
 }; // struct simd_input64
 
+struct simd_input {
+  simd_input64 chunks[SIMD_WIDTH/64];
+  really_inline simd_input(const uint8_t *in_buf) : chunks({
+    simd_input64(in_buf+0*64),
+    simd_input64(in_buf+1*64)
+  }) { }
+  really_inline simd_input64 operator[](size_t index) const { return this->chunks[index]; }
+};
+
 } // namespace simdjson::westmere
 UNTARGET_REGION // westmere
 
