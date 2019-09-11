@@ -57,14 +57,13 @@ using std::exception;
 char* exe_name;
 
 void print_usage(ostream& out) {
-  out << "Usage: " << exe_name << " [-vt] [-n #] [-s STAGE] [-a ARCH] <jsonfile> ..." << endl;
+  out << "Usage: " << exe_name << " [-v] [-n #] [-s STAGE] [-a ARCH] <jsonfile> ..." << endl;
   out << endl;
   out << "Runs the parser against the given json files in a loop, measuring speed and other statistics." << endl;
   out << endl;
   out << "Options:" << endl;
   out << endl;
-  out << "-n #       - Number of iterations per file. Default: 1000" << endl;
-  out << "-t         - Tabbed data output" << endl;
+  out << "-n #       - Number of iterations per file. Default: 200" << endl;
   out << "-v         - Verbose output." << endl;
   out << "-s STAGE   - Stop after the given stage." << endl;
   out << "             -s stage1 - Stop after find_structural_bits." << endl;
@@ -81,14 +80,12 @@ void exit_usage(string message) {
 }
 
 struct option_struct {
-  vector<char*> files;
   Architecture architecture = Architecture::UNSUPPORTED;
   bool stage1_only = false;
 
-  int32_t iterations = 200;
+  int32_t iterations = 400;
 
   bool verbose = false;
-  bool tabbed_output = false;
 
   option_struct(int argc, char **argv) {
     #ifndef _MSC_VER
@@ -98,9 +95,6 @@ struct option_struct {
         switch (c) {
         case 'n':
           iterations = atoi(optarg);
-          break;
-        case 't':
-          tabbed_output = true;
           break;
         case 'v':
           verbose = true;
@@ -132,22 +126,16 @@ struct option_struct {
     if (architecture == Architecture::UNSUPPORTED) {
       architecture = find_best_supported_architecture();
     }
-
-    // All remaining arguments are considered to be files
-    for (int i=optind; i<argc; i++) {
-      files.push_back(argv[i]);
-    }
-    if (files.empty()) {
-      exit_usage("No files specified");
-    }
-
-    #if !defined(__linux__)
-      if (options.tabbed_output) {
-        exit_error("tabbed_output (-t) flag only works under linux.\n");
-      }
-    #endif
   }
 };
+
+double diff(const benchmarker& feature, const benchmarker& baseline) {
+  return (feature.stage1.best.elapsed_ns() - baseline.stage1.best.elapsed_ns()) / baseline.stats->blocks;
+}
+double diff_flip(const benchmarker& feature, const benchmarker& baseline) {
+  // There are roughly 2650 branch mispredicts, so we have to scale it so it represents a per block amount
+  return diff(feature, baseline) * 10000.0 / 2650.0;
+}
 
 int main(int argc, char *argv[]) {
   // Read options
@@ -157,20 +145,34 @@ int main(int argc, char *argv[]) {
     verbose_stream = &cout;
   }
 
-  // Start collecting events. We put this early so if it prints an error message, it's the
+  // Initialize the event collector. We put this early so if it prints an error message, it's the
   // first thing printed.
   event_collector collector;
 
-  // Print preamble
-  if (!options.tabbed_output) {
-    printf("number of iterations %u \n", options.iterations);
-  }
-
   // Set up benchmarkers by reading all files
   json_parser parser(options.architecture);
-  vector<benchmarker*> benchmarkers;
-  for (size_t i=0; i<options.files.size(); i++) {
-    benchmarkers.push_back(new benchmarker(options.files[i], parser, collector));
+
+  benchmarker baseline           ("jsonexamples/baseline-0-structurals.json", parser, collector);
+  benchmarker utf8               ("jsonexamples/baseline-utf-8.json", parser, collector);
+  benchmarker utf8_half          ("jsonexamples/baseline-utf-8-half.json", parser, collector);
+  benchmarker utf8_flip          ("jsonexamples/baseline-utf-8-half-flip.json", parser, collector);
+  vector<char*> structural_filenames, structural_filenames_half, structural_filenames_flip;
+  vector<benchmarker*> structurals, structurals_half, structurals_flip;
+  for (size_t i=1; i<=23; i++) {
+    char* filename = (char*)malloc(200);
+    sprintf(filename, "jsonexamples/baseline-%lu-structurals.json", i);
+    structurals.push_back(new benchmarker(filename, parser, collector));
+    structural_filenames.push_back(filename);
+
+    filename = (char*)malloc(200);
+    sprintf(filename, "jsonexamples/baseline-%lu-structurals-half.json", i);
+    structurals_half.push_back(new benchmarker(filename, parser, collector));
+    structural_filenames_half.push_back(filename);
+
+    filename = (char*)malloc(200);
+    sprintf(filename, "jsonexamples/baseline-%lu-structurals-half-flip.json", i);
+    structurals_flip.push_back(new benchmarker(filename, parser, collector));
+    structural_filenames_flip.push_back(filename);
   }
 
   // Run the benchmarks
@@ -178,16 +180,44 @@ int main(int argc, char *argv[]) {
   for (int iteration = 0; iteration < options.iterations; iteration++) {
     if (!options.verbose) { progress.print(iteration); }
     // Benchmark each file once per iteration
-    for (size_t i=0; i<options.files.size(); i++) {
-      verbose() << "[verbose] " << benchmarkers[i]->filename << " iteration #" << iteration << endl;
-      benchmarkers[i]->run_iteration(options.stage1_only);
+    baseline.run_iteration(options.stage1_only);
+    utf8.run_iteration(options.stage1_only);
+    utf8_half.run_iteration(options.stage1_only);
+    utf8_flip.run_iteration(options.stage1_only);
+    for (size_t i=0;i<structurals.size();i++) {
+      structurals[i]->run_iteration(options.stage1_only);
+      structurals_half[i]->run_iteration(options.stage1_only);
+      structurals_flip[i]->run_iteration(options.stage1_only);
     }
   }
   if (!options.verbose) { progress.erase(); }
+    
 
-  for (size_t i=0; i<options.files.size(); i++) {
-    benchmarkers[i]->print(options.tabbed_output);
-    delete benchmarkers[i];
+  printf("baseline (ns/block)");
+  printf(",utf-8");
+  for (size_t i=0;i<structurals.size(); i++) { printf(",%lu structurals", i+1); }
+  printf(",utf-8 branch miss");
+  for (size_t i=0;i<structurals.size(); i++) { printf(",%lu structurals branch miss", i+1); }
+  printf("\n");
+  printf("%f", baseline.stage1.best.elapsed_ns() / baseline.stats->blocks);
+  printf(",%f", diff(utf8, baseline));
+  printf(",%f", diff(*structurals[0], baseline));
+  for (size_t i=1;i<structurals.size(); i++) {
+    printf(",%f", diff(*structurals[i], *structurals[i-1]));
+  }
+  printf(",%f", diff_flip(utf8_flip, utf8_half));
+  for (size_t i=0;i<structurals.size(); i++) {
+    printf(",%f", diff_flip(*structurals_flip[i], *structurals_half[i]));
+  }
+  printf("\n");
+
+  for (size_t i=0; i<structurals.size(); i++) {
+    free(structural_filenames[i]);
+    free(structural_filenames_half[i]);
+    free(structural_filenames_flip[i]);
+    delete structurals[i];
+    delete structurals_half[i];
+    delete structurals_flip[i];
   }
 
   return EXIT_SUCCESS;

@@ -7,6 +7,7 @@
 # Build outputs (TODO build to a subdir so we can exclude that instead)
 /allparserscheckfile
 /basictests
+/benchfeatures
 /benchmark/parse
 /benchmark/perfdiff
 /benchmark/statisticalmodel
