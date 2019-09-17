@@ -3,6 +3,30 @@
 // We assume the file in which it is included already includes
 // "simdjson/stage1_find_marks.h" (this simplifies amalgation)
 
+// Debugging aids
+void print_input(const uint8_t* buf) {
+  printf("\n");
+  printf("%20s %.64s\n", "input", buf);
+}
+void print_bitmask(const char* name, uint64_t bitmask, uint64_t overflow=0) {
+  printf("%20.20s ", name);
+  for (int i=0;i<64;i++) {
+    if (bitmask & 1) {
+      printf("X");
+    } else {
+      printf(" ");
+    }
+    bitmask >>= 1;
+  }
+  if (overflow) {
+    printf("X");
+  } else {
+    printf(" ");
+  }
+  printf("\n");
+}
+#define PRINT_BITMASK(name) print_bitmask(#name, name);
+
 // return a bitvector indicating where we have characters that end an odd-length
 // sequence of backslashes (and thus change the behavior of the next character
 // to follow). A even-length sequence of backslashes, and, for that matter, the
@@ -196,13 +220,13 @@ really_inline uint64_t find_structurals(
   // Thus, turning a brace into a curly is just OR 0x20, and then we can compare to { or }.
   const simd_input<ARCHITECTURE> to_curly = in.bit_or(0x20);
   const uint64_t open = to_curly.eq('{');             // [ and {
-  const uint64_t close = to_curly.eq('}');            // } and ]
-  const uint64_t separator = in.eq(':') | in.eq(','); // : and ,
-  const uint64_t op = open | close | separator;
+  const uint64_t close = to_curly.eq('}');            // ] and }
+  const uint64_t colon = in.eq(':');
+  const uint64_t separator = colon | in.eq(',');
 
   // Detect the start of a run of primitive characters. Includes numbers, booleans, and strings (").
   // Everything except whitespace, braces, colon and comma.
-  const uint64_t primitive = ~(op | whitespace);
+  const uint64_t primitive = ~(open | close | separator | whitespace);
   const uint64_t follows_primitive = follows(primitive, prev_primitive);
   const uint64_t start_primitive = primitive & ~follows_primitive;
 
@@ -214,7 +238,7 @@ really_inline uint64_t find_structurals(
   );
 
   // Return final structurals
-  return op | start_primitive;
+  return open | close | colon | start_primitive;
 }
 
 // Find structural bits in a 64-byte chunk.
@@ -226,6 +250,7 @@ really_inline void find_structural_bits_64(
     uint64_t &unescaped_chars_error,
     uint64_t &value_sequence_error,
     utf8_checker<ARCHITECTURE> &utf8_state) {
+  // print_input(buf);
   // Validate UTF-8
   const simd_input<ARCHITECTURE> in(buf);
   utf8_state.check_next_input(in);
@@ -241,6 +266,7 @@ really_inline void find_structural_bits_64(
   // find_structurals doesn't use in_string; we filter that out here.
   uint64_t local_value_sequence_error;
   structurals = find_structurals(in, prev_value_required, prev_value_allowed, prev_primitive, local_value_sequence_error);
+  // PRINT_BITMASK(structurals)
 
   structurals &= ~in_string;
   value_sequence_error |= local_value_sequence_error & ~in_string;
@@ -281,6 +307,7 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
   size_t idx = 0;
   // Errors with unescaped characters in strings (ASCII codepoints < 0x20)
   uint64_t unescaped_chars_error = 0;
+  // Errors with missing values or missing operators between values
   uint64_t value_sequence_error = 0;
 
   for (; idx < lenminus64; idx += 64) {
@@ -307,8 +334,7 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
     idx += 64;
   }
 
-  /* finally, flatten out the remaining structurals from the last iteration
-   */
+  // finally, flatten out the remaining structurals from the last iteration
   flatten_bits(base_ptr, base, idx, structurals);
 
   // Check for errors on eof

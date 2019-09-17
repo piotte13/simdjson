@@ -72,8 +72,8 @@ unified_machine(const uint8_t *buf, size_t len, ParsedJson &pj) {
       goto fail;
     }
     pj.write_tape(
-        0, c); /* strangely, moving this to object_begin slows things down */
-    goto object_begin;
+        0, c); /* strangely, moving this to object_continue slows things down */
+    goto object_continue;
   case '[':
     pj.containing_scope_offset[depth] = pj.get_current_loc();
     SET_GOTO_START_CONTINUE();
@@ -82,7 +82,7 @@ unified_machine(const uint8_t *buf, size_t len, ParsedJson &pj) {
       goto fail;
     }
     pj.write_tape(0, c);
-    goto array_begin;
+    goto array_continue;
     /* #define SIMDJSON_ALLOWANYTHINGINROOT
      * A JSON text is a serialized value.  Note that certain previous
      * specifications of JSON constrained a JSON text to be an object or an
@@ -217,21 +217,6 @@ start_continue:
   }
   /*//////////////////////////// OBJECT STATES ///////////////////////////*/
 
-object_begin:
-  UPDATE_CHAR();
-  switch (c) {
-  case '"': {
-    if (!parse_string(buf, len, pj, depth, idx)) {
-      goto fail;
-    }
-    goto object_key_state;
-  }
-  case '}':
-    goto scope_end; /* could also go to object_continue */
-  default:
-    goto fail;
-  }
-
 object_key_state:
   UPDATE_CHAR();
   if (c != ':') {
@@ -297,7 +282,7 @@ object_key_state:
       goto fail;
     }
 
-    goto object_begin;
+    goto object_continue;
   }
   case '[': {
     pj.containing_scope_offset[depth] = pj.get_current_loc();
@@ -311,30 +296,28 @@ object_key_state:
     if (depth >= pj.depth_capacity) {
       goto fail;
     }
-    goto array_begin;
+    goto array_continue;
   }
   default:
     goto fail;
   }
+  // Fall through to object_continue
 
 object_continue:
   UPDATE_CHAR();
   switch (c) {
-  case ',':
-    UPDATE_CHAR();
-    if (c != '"') {
+  case '"': {
+    if (!parse_string(buf, len, pj, depth, idx)) {
       goto fail;
-    } else {
-      if (!parse_string(buf, len, pj, depth, idx)) {
-        goto fail;
-      }
-      goto object_key_state;
     }
+    goto object_key_state;
+  }
   case '}':
-    goto scope_end;
+    goto scope_end; /* could also go to object_continue */
   default:
     goto fail;
   }
+
 
   /*//////////////////////////// COMMON STATE ///////////////////////////*/
 
@@ -348,13 +331,12 @@ scope_end:
   GOTO_CONTINUE()
 
   /*//////////////////////////// ARRAY STATES ///////////////////////////*/
-array_begin:
+array_continue:
   UPDATE_CHAR();
   if (c == ']') {
     goto scope_end; /* could also go to array_continue */
   }
 
-main_array_switch:
   /* we call update char on all paths in, so we can peek at c on the
    * on paths that can accept a close square brace (post-, and at start) */
   switch (c) {
@@ -417,7 +399,7 @@ main_array_switch:
       goto fail;
     }
 
-    goto object_begin;
+    goto object_continue;
   }
   case '[': {
     /* we have not yet encountered ] so we need to come back for it */
@@ -431,23 +413,12 @@ main_array_switch:
     if (depth >= pj.depth_capacity) {
       goto fail;
     }
-    goto array_begin;
+    goto array_continue;
   }
   default:
     goto fail;
   }
-
-array_continue:
-  UPDATE_CHAR();
-  switch (c) {
-  case ',':
-    UPDATE_CHAR();
-    goto main_array_switch;
-  case ']':
-    goto scope_end;
-  default:
-    goto fail;
-  }
+  goto array_continue;
 
   /*//////////////////////////// FINAL STATES ///////////////////////////*/
 
@@ -483,6 +454,7 @@ fail:
     pj.error_code = simdjson::DEPTH_ERROR;
     return pj.error_code;
   }
+printf("fail at %c\n", c);
   switch (c) {
   case '"':
     pj.error_code = simdjson::STRING_ERROR;

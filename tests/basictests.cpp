@@ -12,6 +12,21 @@
 
 // returns true if successful
 bool navigate_test() {
+  // std::string json = "{"
+  //       "\"Image\": {"
+  //           "\"Width\":  800,"
+  //           "\"Height\": 600,"
+  //           "\"Title\":  \"View from 15th Floor\","
+  //           "\"Thumbnail\": {"
+  //           "    \"Url\":    \"http://www.example.com/image/481989943\","
+  //           "    \"Height\": 125,"
+  //           "    \"Width\":  100"
+  //           "},"
+  //           "\"Animated\" : false,"
+  //           "\"IDs\": [116, 943, 234, 38793]"
+  //         "}"
+  //     "}";
+
   std::string json = "{"
         "\"Image\": {"
             "\"Width\":  800,"
@@ -29,7 +44,7 @@ bool navigate_test() {
 
   simdjson::ParsedJson pj = simdjson::build_parsed_json(json);
   if (!pj.is_valid()) {
-      printf("Something is wrong in navigate: %s.\n", json.c_str());
+      printf("Something is wrong in navigate (%s): %s.\n", simdjson::error_message(pj.error_code).c_str(), json.c_str());
       return false;
   }
   simdjson::ParsedJson::Iterator pjh(pj);
@@ -121,12 +136,12 @@ bool skyprophet_test() {
     counter++;
     auto ok1 = json_parse(rec.c_str(), rec.length(), pj);
     if (ok1 != 0 || !pj.is_valid()) {
-      printf("Something is wrong in skyprophet_test: %s.\n", rec.c_str());
+      printf("Something is wrong in skyprophet_test (%s): %s.\n", simdjson::error_message(pj.error_code).c_str(), rec.c_str());
       return false;
     }
     auto ok2 = json_parse(rec, pj);
     if (ok2 != 0 || !pj.is_valid()) {
-      printf("Something is wrong in skyprophet_test: %s.\n", rec.c_str());
+      printf("Something is wrong in skyprophet_test (%s): %s.\n", simdjson::error_message(pj.error_code).c_str(), rec.c_str());
       return false;
     }
   }
