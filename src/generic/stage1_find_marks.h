@@ -69,14 +69,67 @@ really_inline uint64_t follows(const uint64_t match, const uint64_t filler, uint
   return result;
 }
 
+//
+// Detect missing values and operators.
+//
+// 1. Find missing values: [<operator> <whitespace>*] <operator>
+//
+//    e.g. {"a": }
+//
+//    <start of file> is treated like [ or { by initializing prev_desires_value to 1. This will catch
+//    ":" and "," at the start of a file.
+//
+//    <end of file> is treated like ] or } by calling detect_errors_on_eof(). "[1," will leave
+//    prev_follows_separator = true and detect_errors_on_eof() will mark that as an error.
+//
+//    NOTE: Unbalanced {} and [] are handled in stage 2, which includes {<eof> and [<eof>
+//
+// 2. Find missing operators: <value> <whitespace>+ <value>
+//
+//    e.g. "hello" "world"
+//    e.g. {} 123
+//    e.g. [] {}
+//
+//    All characters except operators and whitespace are primitives. (string, number, true, false,
+//    null and even invalid characters: invalid literal characters will be handled in stage 2.)
+//
+//    This will treat characters inside strings as invalid literals; any errors *inside* strings
+//    will be masked away later.
+//
+//    Rule 1: value must come after an operator.
+//
+really_inline uint64_t detect_value_sequence_errors(
+    const uint64_t open,
+    const uint64_t close,
+    const uint64_t separator,
+    const uint64_t start_primitive,
+    const uint64_t whitespace,
+    uint64_t &prev_value_required,
+    uint64_t &prev_value_allowed) {
+  const uint64_t value_required = follows(separator, whitespace, prev_value_required);
+  const uint64_t value_allowed = follows(open | separator, whitespace, prev_value_allowed);
+  return (close & value_required) |          // } or ] after , or :
+         (separator & value_allowed) |       // , or : without a value in front of it
+         (start_primitive & ~value_allowed); // value after another value, } or ]
+}
+
 really_inline ErrorValues detect_errors_on_eof(
-  uint64_t &unescaped_chars_error,
-  const uint64_t prev_in_string) {
+    const uint64_t idx,
+    uint64_t &unescaped_chars_error,
+    const uint64_t prev_in_string,
+    uint64_t &value_sequence_error,
+    const uint64_t prev_value_required) {
+  const uint64_t eof_error_position = (idx % 64);
+  value_sequence_error |= prev_value_required << eof_error_position;
+
+  if (unescaped_chars_error) {
+    return UNESCAPED_CHARS;
+  }
   if (prev_in_string) {
     return UNCLOSED_STRING;
   }
-  if (unescaped_chars_error) {
-    return UNESCAPED_CHARS;
+  if (value_sequence_error) {
+    return UNEXPECTED_ERROR;
   }
   return SUCCESS;
 }
@@ -129,16 +182,36 @@ really_inline uint64_t invalid_string_bytes(const simd_input<ARCHITECTURE> in, c
 // contents of a string the same as content outside. Errors and structurals inside the string or on
 // the trailing quote will need to be removed later when the correct string information is known.
 //
-really_inline uint64_t find_structurals(const simd_input<ARCHITECTURE> in, uint64_t &prev_primitive) {
+really_inline uint64_t find_structurals(
+    const simd_input<ARCHITECTURE> in,
+    uint64_t &prev_value_required,
+    uint64_t &prev_value_allowed,
+    uint64_t &prev_primitive,
+    uint64_t &value_sequence_error) {
   // These use SIMD so let's kick them off before running the regular 64-bit stuff ...
-  uint64_t whitespace, op;
-  find_whitespace_and_operators(in, whitespace, op);
+  uint64_t whitespace = find_whitespace(in);
+
+  // Get operators, {} [] , and :
+  // For braces, we take advantage of a feature of ASCII: [] = 5B and 5D, and {} = 7B and 7D.
+  // Thus, turning a brace into a curly is just OR 0x20, and then we can compare to { or }.
+  const simd_input<ARCHITECTURE> to_curly = in.bit_or(0x20);
+  const uint64_t open = to_curly.eq('{');             // [ and {
+  const uint64_t close = to_curly.eq('}');            // } and ]
+  const uint64_t separator = in.eq(':') | in.eq(','); // : and ,
+  const uint64_t op = open | close | separator;
 
   // Detect the start of a run of primitive characters. Includes numbers, booleans, and strings (").
   // Everything except whitespace, braces, colon and comma.
   const uint64_t primitive = ~(op | whitespace);
   const uint64_t follows_primitive = follows(primitive, prev_primitive);
   const uint64_t start_primitive = primitive & ~follows_primitive;
+
+  // Detect errors in the value sequence now, so we don't have to keep all this information around.
+  // All the caller needs is errors and structurals.
+  value_sequence_error = detect_value_sequence_errors(
+    open, close, separator, start_primitive, whitespace,
+    prev_value_required, prev_value_allowed
+  );
 
   // Return final structurals
   return op | start_primitive;
@@ -148,9 +221,10 @@ really_inline uint64_t find_structurals(const simd_input<ARCHITECTURE> in, uint6
 really_inline void find_structural_bits_64(
     const uint8_t *buf, const size_t idx, uint32_t *&base_ptr, uint32_t &base,
     uint64_t &prev_escaped, uint64_t &prev_in_string,
-    uint64_t &prev_primitive,
+    uint64_t &prev_value_required, uint64_t &prev_value_allowed, uint64_t &prev_primitive,
     uint64_t &structurals,
     uint64_t &unescaped_chars_error,
+    uint64_t &value_sequence_error,
     utf8_checker<ARCHITECTURE> &utf8_state) {
   // Validate UTF-8
   const simd_input<ARCHITECTURE> in(buf);
@@ -165,7 +239,11 @@ really_inline void find_structural_bits_64(
   flatten_bits(base_ptr, base, idx, structurals);
 
   // find_structurals doesn't use in_string; we filter that out here.
-  structurals = find_structurals(in, prev_primitive) & ~in_string;
+  uint64_t local_value_sequence_error;
+  structurals = find_structurals(in, prev_value_required, prev_value_allowed, prev_primitive, local_value_sequence_error);
+
+  structurals &= ~in_string;
+  value_sequence_error |= local_value_sequence_error & ~in_string;
 }
 
 int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &pj) {
@@ -184,12 +262,16 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
    * with an odd-length sequence of backslashes? */
 
   // Whether the first character of the next iteration is escaped.
-  uint64_t prev_escaped = 0ULL;
+  uint64_t prev_escaped = 0;
   // Whether the last iteration was still inside a string (all 1's = true, all 0's = false).
-  uint64_t prev_in_string = 0ULL;
+  uint64_t prev_in_string = 0;
   // Whether the last character of the previous iteration is a primitive value character
   // (anything except whitespace, braces, comma or colon).
-  uint64_t prev_primitive = 0ULL;
+  uint64_t prev_primitive = 0;
+  // Whether the last iteration had an operator (comma or colon) that requires a value.
+  uint64_t prev_value_required = 0;
+  // Whether the last iteration had an operator (open brace, comma or colon) that *allows* a value.
+  uint64_t prev_value_allowed = 1;
   // Mask of structural characters from the last iteration.
   // Kept around for performance reasons, so we can call flatten_bits to soak up some unused
   // CPU capacity while the next iteration is busy with an expensive clmul in compute_quote_mask.
@@ -199,11 +281,15 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
   size_t idx = 0;
   // Errors with unescaped characters in strings (ASCII codepoints < 0x20)
   uint64_t unescaped_chars_error = 0;
+  uint64_t value_sequence_error = 0;
 
   for (; idx < lenminus64; idx += 64) {
     find_structural_bits_64(&buf[idx], idx, base_ptr, base,
-                            prev_escaped, prev_in_string, prev_primitive,
-                            structurals, unescaped_chars_error, utf8_state);
+                            prev_escaped, prev_in_string,
+                            prev_value_required, prev_value_allowed, prev_primitive,
+                            structurals,
+                            unescaped_chars_error, value_sequence_error,
+                            utf8_state);
   }
   /* If we have a final chunk of less than 64 bytes, pad it to 64 with
    * spaces  before processing it (otherwise, we risk invalidating the UTF-8
@@ -213,8 +299,11 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
     memset(tmp_buf, 0x20, 64);
     memcpy(tmp_buf, buf + idx, len - idx);
     find_structural_bits_64(&tmp_buf[0], idx, base_ptr, base,
-                            prev_escaped, prev_in_string, prev_primitive,
-                            structurals, unescaped_chars_error, utf8_state);
+                            prev_escaped, prev_in_string,
+                            prev_value_required, prev_value_allowed, prev_primitive,
+                            structurals,
+                            unescaped_chars_error, value_sequence_error,
+                            utf8_state);
     idx += 64;
   }
 
@@ -222,7 +311,12 @@ int find_structural_bits(const uint8_t *buf, size_t len, simdjson::ParsedJson &p
    */
   flatten_bits(base_ptr, base, idx, structurals);
 
-  simdjson::ErrorValues error = detect_errors_on_eof(unescaped_chars_error, prev_in_string);
+  // Check for errors on eof
+  simdjson::ErrorValues error = detect_errors_on_eof(
+    len,
+    unescaped_chars_error, prev_in_string,
+    value_sequence_error, prev_value_required
+  );
   if (error != simdjson::SUCCESS) {
     return error;
   }

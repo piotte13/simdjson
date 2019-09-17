@@ -21,9 +21,7 @@ really_inline uint64_t compute_quote_mask(const uint64_t quote_bits) {
 #endif
 }
 
-really_inline void find_whitespace_and_operators(
-    const simd_input<ARCHITECTURE> in,
-    uint64_t &whitespace, uint64_t &op) {
+really_inline uint64_t find_whitespace(const simd_input<ARCHITECTURE> in) {
   const uint8x16_t low_nibble_mask =
       (uint8x16_t){16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0};
   const uint8x16_t high_nibble_mask =
@@ -38,13 +36,8 @@ really_inline void find_whitespace_and_operators(
     return vandq_u8(shuf_lo, shuf_hi);
   });
 
-  const uint8x16_t operator_shufti_mask = vmovq_n_u8(0x7);
-  op = v.map([&](auto _v) {
-    return vtstq_u8(_v, operator_shufti_mask);
-  }).to_bitmask();
-
   const uint8x16_t whitespace_shufti_mask = vmovq_n_u8(0x18);
-  whitespace = v.map([&](auto _v) {
+  return v.map([&](auto _v) {
     return vtstq_u8(_v, whitespace_shufti_mask);
   }).to_bitmask();
 }
