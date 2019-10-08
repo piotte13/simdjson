@@ -80,8 +80,8 @@ static inline bool mul_overflow(uint64_t value1, uint64_t value2,
   return high;
 }
 
-static inline int trailing_zeroes(uint64_t input_num) {
-  return static_cast<int>(_tzcnt_u64(input_num));
+static inline int trailing_zeroes(uint64_t bits) {
+  return static_cast<int>(_tzcnt_u64(bits));
 }
 
 static inline int leading_zeroes(uint64_t input_num) {
@@ -114,20 +114,38 @@ static inline bool mul_overflow(uint64_t value1, uint64_t value2,
 }
 
 /* result might be undefined when input_num is zero */
-static inline NO_SANITIZE_UNDEFINED int trailing_zeroes(uint64_t input_num) {
+static inline NO_SANITIZE_UNDEFINED int trailing_zeroes(uint64_t bits) {
 #ifdef __BMI__ // tzcnt is BMI1
-  return _tzcnt_u64(input_num);
+  return _tzcnt_u64(bits);
 #else
-  return __builtin_ctzll(input_num);
+  return __builtin_ctzll(bits);
 #endif
 }
 
 /* result might be undefined when input_num is zero */
-static inline int leading_zeroes(uint64_t input_num) {
-#ifdef __BMI2__
-  return _lzcnt_u64(input_num);
+static inline NO_SANITIZE_UNDEFINED int trailing_zeroes(uint32_t bits) {
+#ifdef __BMI__ // tzcnt is BMI1
+  return _tzcnt_u32(bits);
 #else
-  return __builtin_clzll(input_num);
+  return __builtin_ctzll(bits);
+#endif
+}
+
+/* result might be undefined when input_num is zero */
+static inline int leading_zeroes(uint64_t bits) {
+#ifdef __BMI2__
+  return _lzcnt_u64(bits);
+#else
+  return __builtin_clzll(bits);
+#endif
+}
+
+/* result might be undefined when input_num is zero */
+static inline int leading_zeroes(uint32_t bits) {
+#ifdef __BMI2__
+  return _lzcnt_u32(bits);
+#else
+  return __builtin_clzll(bits);
 #endif
 }
 
@@ -143,6 +161,34 @@ static inline int hamming(uint64_t input_num) {
 #endif // _MSC_VER
 
 namespace simdjson {
+static inline void clear_trailing_one(uint64_t& bits) {
+#ifdef __BMI__ // blsr is BMI1
+  bits = _blsr_u64(bits);
+#else
+  bits = bits & (bits - 1);
+#endif
+}
+
+static inline void clear_trailing_one(uint32_t& bits) {
+#ifdef __BMI__ // blsr is BMI1
+  bits = _blsr_u32(bits);
+#else
+  bits = bits & (bits - 1);
+#endif
+}
+
+static inline int take_trailing_one(uint64_t& bits) {
+  int result = trailing_zeroes(bits);
+  clear_trailing_one(bits);
+  return result;
+}
+
+static inline int take_trailing_one(uint32_t& bits) {
+  int result = trailing_zeroes(bits);
+  clear_trailing_one(bits);
+  return result;
+}
+
 // portable version of  posix_memalign
 static inline void *aligned_malloc(size_t alignment, size_t size) {
   void *p;

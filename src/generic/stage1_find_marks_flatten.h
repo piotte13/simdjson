@@ -37,16 +37,14 @@ really_inline void flatten_bits(uint32_t *&base_ptr, uint32_t idx, uint64_t bits
 
   // Do the first 8 all together
   for (int i=0; i<8; i++) {
-    base_ptr[i] = idx + trailing_zeroes(bits);
-    bits = bits & (bits - 1);
+    base_ptr[i] = idx + take_trailing_one(bits);
   }
 
   // Do the next 8 all together (we hope in most cases it won't happen at all
   // and the branch is easily predicted).
   if (unlikely(cnt > 8)) {
     for (int i=8; i<16; i++) {
-      base_ptr[i] = idx + trailing_zeroes(bits);
-      bits = bits & (bits - 1);
+      base_ptr[i] = idx + take_trailing_one(bits);
     }
 
     // Most files don't have 16+ structurals per block, so we take several basically guaranteed
@@ -55,8 +53,7 @@ really_inline void flatten_bits(uint32_t *&base_ptr, uint32_t idx, uint64_t bits
     if (unlikely(cnt > 16)) {
       uint32_t i = 16;
       do {
-        base_ptr[i] = idx + trailing_zeroes(bits);
-        bits = bits & (bits - 1);
+        base_ptr[i] = idx + take_trailing_one(bits);
         i++;
       } while (i < cnt);
     }

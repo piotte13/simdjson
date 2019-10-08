@@ -39,11 +39,8 @@ really_inline __m128i load_with_padding(const uint8_t * src, const uint8_t *src_
   return  _mm_loadu_si128(reinterpret_cast<const __m128i *>(src));
 }
 
-really_inline scanned_string scan_string(const uint8_t *src, uint8_t *dst, const uint8_t *src_end, utf8_checker &utf8) {
+really_inline scanned_string scan_string(const uint8_t *src, const uint8_t *src_end, utf8_checker &utf8) {
   __m128i v = load_with_padding(src, src_end);
-  // store to dest unconditionally - we can overwrite the bits we don't like
-  // later
-  _mm_storeu_si128(reinterpret_cast<__m128i *>(dst), v);
   auto quote_mask = _mm_cmpeq_epi8(v, _mm_set1_epi8('"'));
   utf8.check_next_input(v);
   return {

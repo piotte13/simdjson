@@ -41,14 +41,12 @@ really_inline __m128i load_with_padding(const uint8_t * src, const uint8_t *src_
   v1 = vld1q_u8(src + 16);
 }
 
-really_inline scanned_string scan_string(const uint8_t *src, uint8_t *dst, const uint8_t *src_end, utf8_checker &utf8) {
+really_inline scanned_string scan_string(const uint8_t *src, const uint8_t *src_end, utf8_checker &utf8) {
   // this can read up to 31 bytes beyond the buffer size, but we require
   // SIMDJSON_PADDING of padding
   static_assert(2 * sizeof(uint8x16_t) - 1 <= SIMDJSON_PADDING);
   uint8x16_t v0, v1;
   load_with_padding(src, src_end, v0, v1);
-  vst1q_u8(dst, v0);
-  vst1q_u8(dst + 16, v1);
 
   uint8x16_t bs_mask = vmovq_n_u8('\\');
   uint8x16_t qt_mask = vmovq_n_u8('"');

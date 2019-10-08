@@ -39,14 +39,12 @@ really_inline __m256i load_with_padding(const uint8_t * src, const uint8_t *src_
   return  _mm256_loadu_si256(reinterpret_cast<const __m256i *>(src));
 }
 
-really_inline scanned_string scan_string(const uint8_t *src, uint8_t *dst, const uint8_t *src_end, utf8_checker &utf8) {
+really_inline scanned_string scan_string(const uint8_t *src, const uint8_t *src_end, utf8_checker &utf8) {
   // this can read up to 31 bytes beyond the buffer size, but we require
   // SIMDJSON_PADDING of padding
   static_assert(sizeof(__m256i) - 1 <= SIMDJSON_PADDING);
   __m256i v = load_with_padding(src, src_end);
 
-  // store to dest unconditionally - we can overwrite the bits we don't like later
-  _mm256_storeu_si256(reinterpret_cast<__m256i *>(dst), v);
   auto quote_mask = _mm256_cmpeq_epi8(v, _mm256_set1_epi8('"'));
   utf8.check_next_input(v);
   return {
