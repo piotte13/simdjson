@@ -80,15 +80,35 @@ static inline bool mul_overflow(uint64_t value1, uint64_t value2,
   return high;
 }
 
-static inline int trailing_zeroes(uint64_t input_num) {
+static inline unsigned int trailing_zeroes(uint64_t input_num) {
   return static_cast<int>(_tzcnt_u64(input_num));
 }
 
-static inline int leading_zeroes(uint64_t input_num) {
+static inline unsigned int trailing_zeroes(uint32_t input_num) {
+  return static_cast<int>(_tzcnt_u32(input_num));
+}
+
+static inline unsigned int leading_zeroes(uint64_t input_num) {
   return static_cast<int>(_lzcnt_u64(input_num));
 }
 
-static inline int hamming(uint64_t input_num) {
+static inline unsigned int leading_zeroes(uint32_t input_num) {
+  return static_cast<int>(_lzcnt_u32(input_num));
+}
+
+static inline unsigned int take_lowest_set_bit(uint64_t &input_num) {
+  int result = trailing_zeroes(input_num);
+  input_num = _blsr_u64(input_num);
+  return result;
+}
+
+static inline unsigned int take_lowest_set_bit(uint32_t &input_num) {
+  int result = trailing_zeroes(input_num);
+  input_num = _blsr_u32(input_num);
+  return result;
+}
+
+static inline unsigned int hamming(uint64_t input_num) {
 #ifdef _WIN64 // highly recommended!!!
   return (int)__popcnt64(input_num);
 #else // if we must support 32-bit Windows
@@ -114,7 +134,7 @@ static inline bool mul_overflow(uint64_t value1, uint64_t value2,
 }
 
 /* result might be undefined when input_num is zero */
-static inline NO_SANITIZE_UNDEFINED int trailing_zeroes(uint64_t input_num) {
+static inline NO_SANITIZE_UNDEFINED unsigned int trailing_zeroes(uint64_t input_num) {
 #ifdef __BMI__ // tzcnt is BMI1
   return _tzcnt_u64(input_num);
 #else
@@ -123,7 +143,16 @@ static inline NO_SANITIZE_UNDEFINED int trailing_zeroes(uint64_t input_num) {
 }
 
 /* result might be undefined when input_num is zero */
-static inline int leading_zeroes(uint64_t input_num) {
+static inline NO_SANITIZE_UNDEFINED unsigned int trailing_zeroes(uint32_t input_num) {
+#ifdef __BMI__ // tzcnt is BMI1
+  return _tzcnt_u32(input_num);
+#else
+  return __builtin_ctzl(input_num);
+#endif
+}
+
+/* result might be undefined when input_num is zero */
+static inline unsigned int leading_zeroes(uint64_t input_num) {
 #ifdef __BMI2__
   return _lzcnt_u64(input_num);
 #else
@@ -132,7 +161,36 @@ static inline int leading_zeroes(uint64_t input_num) {
 }
 
 /* result might be undefined when input_num is zero */
-static inline int hamming(uint64_t input_num) {
+static inline unsigned int leading_zeroes(uint32_t input_num) {
+#ifdef __BMI2__
+  return _lzcnt_u32(input_num);
+#else
+  return __builtin_clzl(input_num);
+#endif
+}
+
+static inline unsigned int take_lowest_set_bit(uint64_t &input_num) {
+  int result = trailing_zeroes(input_num);
+#ifdef __BMI__
+  input_num = _blsr_u64(input_num);
+#else
+  input_num &= (input_num - 1);
+#endif
+  return result;
+}
+
+static inline unsigned int take_lowest_set_bit(uint32_t &input_num) {
+  unsigned int result = trailing_zeroes(input_num);
+#ifdef __BMI__
+  input_num = _blsr_u32(input_num);
+#else
+  input_num &= (input_num - 1);
+#endif
+  return result;
+}
+
+/* result might be undefined when input_num is zero */
+static inline unsigned int hamming(uint64_t input_num) {
 #ifdef __POPCOUNT__
   return _popcnt64(input_num);
 #else
@@ -141,6 +199,11 @@ static inline int hamming(uint64_t input_num) {
 }
 } // namespace simdjson
 #endif // _MSC_VER
+
+static inline size_t saturating_sub(size_t x, size_t y)
+{
+	return (x - y) & -(x >= y); // If x < y, this is (x - y) & 0000. Otherwise it's & FFFF
+}
 
 #ifdef _MSC_VER
 #define simdjson_strcasecmp _stricmp

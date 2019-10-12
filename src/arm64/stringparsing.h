@@ -16,13 +16,39 @@ void found_bad_string(const uint8_t *buf);
 namespace simdjson::arm64 {
 
 // Holds backslashes and quotes locations.
-struct parse_string_helper {
+struct bs_and_quote_bits {
   uint32_t bs_bits;
   uint32_t quote_bits;
-  really_inline uint32_t bytes_processed() const { return sizeof(uint8x16_t)*2; }
+  static const int SCAN_WIDTH = 2*sizeof(uint8x16_t);
+
+  really_inline void consume(unsigned int consumed) {
+    this->bs_bits >>= consumed;
+    this->quote_bits >>= consumed;
+  }
+
+  really_inline bool has_backslash_in_string() {
+    auto backslashes_before_quotes = ((this->quote_bits - 1) & this->bs_bits);
+    return backslashes_before_quotes != 0;
+  }
+
+  really_inline bool has_backslash() {
+    return this->bs_bits != 0;
+  }
+
+  really_inline bool has_quote() {
+    return this->quote_bits != 0;
+  }
+
+  really_inline unsigned int next_backslash() {
+    return trailing_zeroes(this->bs_bits);
+  }
+
+  really_inline unsigned int next_quote() {
+    return trailing_zeroes(this->quote_bits);
+  }
 };
 
-really_inline parse_string_helper find_bs_bits_and_quote_bits(const uint8_t *src, uint8_t *dst) {
+really_inline bs_and_quote_bits find_bs_and_quote_bits(const uint8_t *src, uint8_t *dst) {
   // this can read up to 31 bytes beyond the buffer size, but we require
   // SIMDJSON_PADDING of padding
   static_assert(2 * sizeof(uint8x16_t) - 1 <= SIMDJSON_PADDING);

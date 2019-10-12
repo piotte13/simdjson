@@ -2718,13 +2718,13 @@ void found_bad_string(const uint8_t *buf);
 namespace simdjson::arm64 {
 
 // Holds backslashes and quotes locations.
-struct parse_string_helper {
+struct scanned_backslash_and_quote {
   uint32_t bs_bits;
   uint32_t quote_bits;
   really_inline uint32_t bytes_processed() const { return sizeof(uint8x16_t); }
 };
 
-really_inline parse_string_helper find_bs_bits_and_quote_bits(const uint8_t *src, uint8_t *dst) {
+really_inline scanned_backslash_and_quote scan_backslash_and_quote(const uint8_t *src, uint8_t *dst) {
   // this can read up to 31 bytes beyond the buffer size, but we require
   // SIMDJSON_PADDING of padding
   static_assert(2 * sizeof(uint8x16_t) - 1 <= SIMDJSON_PADDING);
@@ -2838,7 +2838,7 @@ WARN_UNUSED really_inline bool parse_string(UNUSED const uint8_t *buf,
   uint8_t *dst = pj.current_string_buf_loc + sizeof(uint32_t);
   const uint8_t *const start_of_string = dst;
   while (1) {
-    parse_string_helper helper = find_bs_bits_and_quote_bits(src, dst);
+    scanned_backslash_and_quote helper = scan_backslash_and_quote(src, dst);
     if (((helper.bs_bits - 1) & helper.quote_bits) != 0) {
       /* we encountered quotes first. Move dst to point to quotes and exit
        */
@@ -2927,13 +2927,13 @@ TARGET_HASWELL
 namespace simdjson::haswell {
 
 // Holds backslashes and quotes locations.
-struct parse_string_helper {
+struct scanned_backslash_and_quote {
   uint32_t bs_bits;
   uint32_t quote_bits;
   really_inline uint32_t bytes_processed() const { return sizeof(__m256i); }
 };
 
-really_inline parse_string_helper find_bs_bits_and_quote_bits(const uint8_t *src, uint8_t *dst) {
+really_inline scanned_backslash_and_quote scan_backslash_and_quote(const uint8_t *src, uint8_t *dst) {
   // this can read up to 31 bytes beyond the buffer size, but we require
   // SIMDJSON_PADDING of padding
   static_assert(sizeof(__m256i) - 1 <= SIMDJSON_PADDING);
@@ -3029,7 +3029,7 @@ WARN_UNUSED really_inline bool parse_string(UNUSED const uint8_t *buf,
   uint8_t *dst = pj.current_string_buf_loc + sizeof(uint32_t);
   const uint8_t *const start_of_string = dst;
   while (1) {
-    parse_string_helper helper = find_bs_bits_and_quote_bits(src, dst);
+    scanned_backslash_and_quote helper = scan_backslash_and_quote(src, dst);
     if (((helper.bs_bits - 1) & helper.quote_bits) != 0) {
       /* we encountered quotes first. Move dst to point to quotes and exit
        */
@@ -3119,13 +3119,13 @@ TARGET_WESTMERE
 namespace simdjson::westmere {
 
 // Holds backslashes and quotes locations.
-struct parse_string_helper {
+struct scanned_backslash_and_quote {
   uint32_t bs_bits;
   uint32_t quote_bits;
   really_inline uint32_t bytes_processed() const { return sizeof(__m128i); }
 };
 
-really_inline parse_string_helper find_bs_bits_and_quote_bits(const uint8_t *src, uint8_t *dst) {
+really_inline scanned_backslash_and_quote scan_backslash_and_quote(const uint8_t *src, uint8_t *dst) {
   // this can read up to 31 bytes beyond the buffer size, but we require
   // SIMDJSON_PADDING of padding
   __m128i v = _mm_loadu_si128(reinterpret_cast<const __m128i *>(src));
@@ -3220,7 +3220,7 @@ WARN_UNUSED really_inline bool parse_string(UNUSED const uint8_t *buf,
   uint8_t *dst = pj.current_string_buf_loc + sizeof(uint32_t);
   const uint8_t *const start_of_string = dst;
   while (1) {
-    parse_string_helper helper = find_bs_bits_and_quote_bits(src, dst);
+    scanned_backslash_and_quote helper = scan_backslash_and_quote(src, dst);
     if (((helper.bs_bits - 1) & helper.quote_bits) != 0) {
       /* we encountered quotes first. Move dst to point to quotes and exit
        */

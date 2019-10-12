@@ -34,22 +34,21 @@ static const uint8_t escape_map[256] = {
 // src will advance 6 bytes or 12 bytes
 // dest will advance a variable amount (return via pointer)
 // return true if the unicode codepoint was valid
+
 // We work in little-endian then swap at write time
-WARN_UNUSED
-really_inline bool handle_unicode_codepoint(const uint8_t **src_ptr,
-                                            uint8_t **dst_ptr) {
+really_inline void handle_unicode_codepoint(const uint8_t *& src, uint8_t *&dst, bool &has_error) {
   // hex_to_u32_nocheck fills high 16 bits of the return value with 1s if the
   // conversion isn't valid; we defer the check for this to inside the
   // multilingual plane check
-  uint32_t code_point = hex_to_u32_nocheck(*src_ptr + 2);
-  *src_ptr += 6;
+  uint32_t code_point = hex_to_u32_nocheck(src); // \u...
+  src += 6;
   // check for low surrogate for characters outside the Basic
   // Multilingual Plane.
   if (code_point >= 0xd800 && code_point < 0xdc00) {
-    if (((*src_ptr)[0] != '\\') || (*src_ptr)[1] != 'u') {
-      return false;
+    if ((src[0] != '\\') || (src[1] != 'u')) { // XXXX\u
+      has_error = true;
     }
-    uint32_t code_point_2 = hex_to_u32_nocheck(*src_ptr + 2);
+    uint32_t code_point_2 = hex_to_u32_nocheck(&src[2]); // XXXX\u...
 
     // if the first code point is invalid we will get here, as we will go past
     // the check for being outside the Basic Multilingual plane. If we don't
@@ -57,89 +56,87 @@ really_inline bool handle_unicode_codepoint(const uint8_t **src_ptr,
     // this check catches both the case of the first code point being invalid
     // or the second code point being invalid.
     if ((code_point | code_point_2) >> 16) {
-      return false;
+      has_error = true;
     }
 
-    code_point =
-        (((code_point - 0xd800) << 10) | (code_point_2 - 0xdc00)) + 0x10000;
-    *src_ptr += 6;
+    code_point = (((code_point - 0xd800) << 10) | (code_point_2 - 0xdc00)) + 0x10000;
+    src += 6;
   }
-  size_t offset = codepoint_to_utf8(code_point, *dst_ptr);
-  *dst_ptr += offset;
-  return offset > 0;
+  size_t offset = codepoint_to_utf8(code_point, dst);
+  dst += offset;
+  if (offset == 0) {
+    has_error = true;
+  }
 }
 
-WARN_UNUSED really_inline bool parse_string(UNUSED const uint8_t *buf,
-                                            UNUSED size_t len, ParsedJson &pj,
-                                            UNUSED const uint32_t depth,
-                                            UNUSED uint32_t offset) {
+really_inline void parse_backslash(const uint8_t *&src, uint8_t *&dst, bs_and_quote_bits &scanned_bits, bool &has_error) {
+  unsigned int bs_dist = scanned_bits.next_backslash();
+  src += bs_dist;
+  dst += bs_dist; // We've already copied in any non-backslash bits
+
+  // Read the escape character (the n in \n).
+  uint8_t escape_char = src[1];
+  src += 2;
+
+  // Handle \u separately; it's the only > 1 char escape.
+  // I, I took the branch less traveled by. And that has made all the difference.
+  if (escape_char == 'u') {
+    handle_unicode_codepoint(src, dst, has_error);
+
+  } else {
+    // Write out the translated escape character. e.g. \n -> 0x0A
+    uint8_t escape_result = escape_map[escape_char];
+    has_error = has_error || (escape_result == 0u); // Error if it's an unrecognized escape character.
+    dst[0] = escape_result;
+    dst++;
+  }
+
+  // Copy everything starting after the \x to dst to "fill in the blanks". Use a constant number of
+  // bytes; we'll fill in the rest later.
+  scanned_bits = find_bs_and_quote_bits(src, dst);
+}
+
+WARN_UNUSED
+really_inline bool parse_string(UNUSED const uint8_t *buf,
+                                UNUSED size_t len, ParsedJson &pj,
+                                UNUSED const uint32_t depth,
+                                UNUSED uint32_t offset) {
   pj.write_tape(pj.current_string_buf_loc - pj.string_buf, '"');
-  const uint8_t *src = &buf[offset + 1]; /* we know that buf at offset is a " */
   uint8_t *dst = pj.current_string_buf_loc + sizeof(uint32_t);
   const uint8_t *const start_of_string = dst;
-  while (1) {
-    parse_string_helper helper = find_bs_bits_and_quote_bits(src, dst);
-    if (((helper.bs_bits - 1) & helper.quote_bits) != 0) {
-      /* we encountered quotes first. Move dst to point to quotes and exit
-       */
 
-      /* find out where the quote is... */
-      uint32_t quote_dist = trailing_zeroes(helper.quote_bits);
-
-      /* NULL termination is still handy if you expect all your strings to
-       * be NULL terminated? */
-      /* It comes at a small cost */
-      dst[quote_dist] = 0;
-
-      uint32_t str_length = (dst - start_of_string) + quote_dist;
-      memcpy(pj.current_string_buf_loc, &str_length, sizeof(uint32_t));
-      /*****************************
-       * Above, check for overflow in case someone has a crazy string
-       * (>=4GB?)                 _
-       * But only add the overflow check when the document itself exceeds
-       * 4GB
-       * Currently unneeded because we refuse to parse docs larger or equal
-       * to 4GB.
-       ****************************/
-
-      /* we advance the point, accounting for the fact that we have a NULL
-       * termination         */
-      pj.current_string_buf_loc = dst + quote_dist + 1;
-      return true;
+  // Process the string in blocks, stopping when we find a quote.
+  const uint8_t *src = &buf[offset + 1]; /* we know that buf at offset is a " */
+  bool has_error = false;
+  bs_and_quote_bits scanned_bits;
+  do {
+    scanned_bits = find_bs_and_quote_bits(src, dst);
+    while (scanned_bits.has_backslash_in_string()) {
+      parse_backslash(src, dst, scanned_bits, has_error);
     }
-    if (((helper.quote_bits - 1) & helper.bs_bits) != 0) {
-      /* find out where the backspace is */
-      uint32_t bs_dist = trailing_zeroes(helper.bs_bits);
-      uint8_t escape_char = src[bs_dist + 1];
-      /* we encountered backslash first. Handle backslash */
-      if (escape_char == 'u') {
-        /* move src/dst up to the start; they will be further adjusted
-           within the unicode codepoint handling code. */
-        src += bs_dist;
-        dst += bs_dist;
-        if (!handle_unicode_codepoint(&src, &dst)) {
-          return false;
-        }
-      } else {
-        /* simple 1:1 conversion. Will eat bs_dist+2 characters in input and
-         * write bs_dist+1 characters to output
-         * note this may reach beyond the part of the buffer we've actually
-         * seen. I think this is ok */
-        uint8_t escape_result = escape_map[escape_char];
-        if (escape_result == 0u) {
-          return false; /* bogus escape value is an error */
-        }
-        dst[bs_dist] = escape_result;
-        src += bs_dist + 2;
-        dst += bs_dist + 1;
-      }
-    } else {
-      /* they are the same. Since they can't co-occur, it means we
-       * encountered neither. */
-      src += helper.bytes_processed();
-      dst += helper.bytes_processed();
-    }
-  }
-  /* can't be reached */
-  return true;
+    src += bs_and_quote_bits::SCAN_WIDTH;
+  } while (!scanned_bits.has_quote());
+  dst += scanned_bits.next_quote(); // we've already copied over everything to dst.
+
+  // Write out the length of the string at the *start* of the string.
+  uint32_t str_length = dst - start_of_string;
+  memcpy(pj.current_string_buf_loc, &str_length, sizeof(uint32_t));
+  /*****************************
+    * Above, check for overflow in case someone has a crazy string
+    * (>=4GB?)                 _
+    * But only add the overflow check when the document itself exceeds
+    * 4GB
+    * Currently unneeded because we refuse to parse docs larger or equal
+    * to 4GB.
+    ****************************/
+
+  /* NULL termination is still handy if you expect all your strings to be NULL terminated? */
+  /* It comes at a small cost */
+  dst[0] = '\0';
+  dst++;
+
+  // Advance the string tape now that we've written the whole string.
+  pj.current_string_buf_loc = dst;
+
+  return !has_error;
 }
