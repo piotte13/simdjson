@@ -72,7 +72,6 @@ public:
   uint64_t unescaped_chars_error = 0;
   bit_indexer structural_indexes;
 
-
   json_structural_scanner(uint32_t *_structural_indexes) : structural_indexes{_structural_indexes} {}
 
   // return a bitvector indicating where we have characters that end an odd-length
