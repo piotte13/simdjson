@@ -1,35 +1,33 @@
-#ifndef SIMDJSON_HASWELL_SIMD_INPUT_H
-#define SIMDJSON_HASWELL_SIMD_INPUT_H
+#ifndef SIMDJSON_HASWELL_SIMD_H
+#define SIMDJSON_HASWELL_SIMD_H
 
 #include "simdjson/common_defs.h"
 #include "simdjson/portability.h"
-#include "simdjson/simdjson.h"
 
 #ifdef IS_X86_64
 
 TARGET_HASWELL
-namespace simdjson::haswell {
+namespace simdjson::haswell::simd {
 
-namespace simd256 {
   // SIMD type, just so we can copy/paste more easily between architectures.
   typedef __m256i simd_t;
-  // Output of simd_m8.to_bitmask(). uint32_t for 32-byte SIMD registers, uint16_t for 16-byte.
-  typedef uint32_t simd_m8_bitmask;
+  // Output of m8.to_bitmask(). uint32_t for 32-byte SIMD registers, uint16_t for 16-byte.
+  typedef uint32_t m8_bitmask;
 
   // Forward-declared so they can be used by splat and friends.
-  struct simd_m8;
-  struct simd_u8;
-  struct simd_i8;
+  struct m8;
+  struct u8;
+  struct i8;
 
   template<typename Child, typename Element>
-  struct simd_base {
+  struct base {
     simd_t value;
 
     // Zero constructor
-    really_inline simd_base() : value{} {}
+    really_inline base() : value{simd_t()} {}
 
     // Conversion from SIMD register
-    really_inline simd_base(const simd_t _value) : value(_value) {}
+    really_inline base(const simd_t _value) : value(_value) {}
 
     // Conversion to SIMD register
     really_inline operator const simd_t&() const { return this->value; }
@@ -46,14 +44,14 @@ namespace simd256 {
     really_inline Child& operator^=(const Child other) { auto this_cast = (Child*)this; *this_cast = *this_cast ^ other; return *this_cast; }
   };
 
-  template<typename Child, typename Element, typename Mask=simd_m8>
-  struct simd_base8: simd_base<Child,Element> {
-    really_inline simd_base8() : simd_base<Child,Element>() {}
-    really_inline simd_base8(const simd_t _value) : simd_base<Child,Element>(_value) {}
+  template<typename Child, typename Element, typename Mask=m8>
+  struct base8: base<Child,Element> {
+    really_inline base8() : base<Child,Element>() {}
+    really_inline base8(const simd_t _value) : base<Child,Element>(_value) {}
 
     really_inline Mask operator==(const Child other) const { return _mm256_cmpeq_epi8(*this, other); }
 
-    static const int SIZE = sizeof(simd_base<Child,Element>::value);
+    static const int SIZE = sizeof(base<Child,Element>::value);
 
     really_inline Child prev(const Child prev_chunk) const {
       return _mm256_alignr_epi8(*this, _mm256_permute2x128_si256(prev_chunk, *this, 0x21), 15);
@@ -64,32 +62,32 @@ namespace simd256 {
   };
 
   // SIMD byte mask type (returned by things like eq and gt)
-  struct simd_m8: simd_base8<simd_m8, bool> {
-    static really_inline simd_m8 splat(bool _value) { return _mm256_set1_epi8(-(!!_value)); }
+  struct m8: base8<m8, bool> {
+    static really_inline m8 splat(bool _value) { return _mm256_set1_epi8(-(!!_value)); }
 
-    really_inline simd_m8() : simd_base8() {}
-    really_inline simd_m8(const simd_t _value) : simd_base8<simd_m8,bool>(_value) {}
+    really_inline m8() : base8() {}
+    really_inline m8(const simd_t _value) : base8<m8,bool>(_value) {}
     // Splat constructor
-    really_inline simd_m8(bool _value) : simd_base8<simd_m8,bool>(splat(_value)) {}
+    really_inline m8(bool _value) : base8<m8,bool>(splat(_value)) {}
 
-    really_inline simd_m8_bitmask to_bitmask() const { return _mm256_movemask_epi8(*this); }
+    really_inline m8_bitmask to_bitmask() const { return _mm256_movemask_epi8(*this); }
     really_inline bool any() const { return _mm256_testz_si256(*this, *this) == 0; }
   };
 
   template<typename Child, typename Element>
-  struct simd_numeric8: simd_base8<Child, Element> {
+  struct simd_numeric8: base8<Child, Element> {
     static really_inline Child splat(Element _value) { return _mm256_set1_epi8(_value); }
     static really_inline Child zero() { return _mm256_setzero_si256(); }
     static really_inline Child load(const Element* values) {
       return _mm256_loadu_si256(reinterpret_cast<const simd_t *>(values));
     }
 
-    really_inline simd_numeric8() : simd_base8<Child,Element>() {}
-    really_inline simd_numeric8(const simd_t _value) : simd_base8<Child,Element>(_value) {}
+    really_inline simd_numeric8() : base8<Child,Element>() {}
+    really_inline simd_numeric8(const simd_t _value) : base8<Child,Element>(_value) {}
     // Splat constructor
-    really_inline simd_numeric8(Element _value) : simd_base8<Child,Element>(splat(_value)) {}
+    really_inline simd_numeric8(Element _value) : base8<Child,Element>(splat(_value)) {}
     // Element array constructor
-    really_inline simd_numeric8(const Element* values) : simd_base8<Child,Element>(load(values)) {}
+    really_inline simd_numeric8(const Element* values) : base8<Child,Element>(load(values)) {}
 
     // Addition/subtraction are the same for signed and unsigned
     really_inline Child operator+(const Child other) const { return _mm256_add_epi8(*this, other); }
@@ -115,71 +113,71 @@ namespace simd256 {
   };
 
   // Signed bytes
-  struct simd_i8 : simd_numeric8<simd_i8, int8_t> {
-    really_inline simd_i8() : simd_numeric8<simd_i8,int8_t>() {}
-    really_inline simd_i8(const simd_t _value) : simd_numeric8<simd_i8,int8_t>(_value) {}
-    really_inline simd_i8(int8_t _value) : simd_numeric8<simd_i8,int8_t>(_value) {}
-    really_inline simd_i8(const int8_t* values) : simd_numeric8<simd_i8,int8_t>(values) {}
+  struct i8 : simd_numeric8<i8, int8_t> {
+    really_inline i8() : simd_numeric8<i8,int8_t>() {}
+    really_inline i8(const simd_t _value) : simd_numeric8<i8,int8_t>(_value) {}
+    really_inline i8(int8_t _value) : simd_numeric8<i8,int8_t>(_value) {}
+    really_inline i8(const int8_t* values) : simd_numeric8<i8,int8_t>(values) {}
     // Member-by-member initialization
-    really_inline simd_i8(
+    really_inline i8(
       int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3, int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
       int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15,
       int8_t v16, int8_t v17, int8_t v18, int8_t v19, int8_t v20, int8_t v21, int8_t v22, int8_t v23,
       int8_t v24, int8_t v25, int8_t v26, int8_t v27, int8_t v28, int8_t v29, int8_t v30, int8_t v31
-    ) : simd_numeric8<simd_i8,int8_t>(_mm256_setr_epi8(
+    ) : simd_numeric8<i8,int8_t>(_mm256_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,v24,v25,v26,v27,v28,v29,v30,v31
     )) {}
 
     // Order-sensitive comparisons
-    really_inline simd_i8 max(const simd_i8 other) const { return _mm256_max_epi8(*this, other); }
-    really_inline simd_i8 min(const simd_i8 other) const { return _mm256_min_epi8(*this, other); }
-    really_inline simd_m8 operator>(const simd_i8 other) const { return _mm256_cmpgt_epi8(*this, other); }
+    really_inline i8 max(const i8 other) const { return _mm256_max_epi8(*this, other); }
+    really_inline i8 min(const i8 other) const { return _mm256_min_epi8(*this, other); }
+    really_inline m8 operator>(const i8 other) const { return _mm256_cmpgt_epi8(*this, other); }
   };
 
   // Unsigned bytes
-  struct simd_u8: simd_numeric8<simd_u8, uint8_t> {
-    really_inline simd_u8() : simd_numeric8<simd_u8,uint8_t>() {}
-    really_inline simd_u8(const simd_t _value) : simd_numeric8<simd_u8,uint8_t>(_value) {}
-    really_inline simd_u8(uint8_t _value) : simd_numeric8<simd_u8,uint8_t>(_value) {}
-    really_inline simd_u8(const uint8_t* values) : simd_numeric8<simd_u8,uint8_t>(values) {}
+  struct u8: simd_numeric8<u8, uint8_t> {
+    really_inline u8() : simd_numeric8<u8,uint8_t>() {}
+    really_inline u8(const simd_t _value) : simd_numeric8<u8,uint8_t>(_value) {}
+    really_inline u8(uint8_t _value) : simd_numeric8<u8,uint8_t>(_value) {}
+    really_inline u8(const uint8_t* values) : simd_numeric8<u8,uint8_t>(values) {}
     // Member-by-member initialization
-    really_inline simd_u8(
+    really_inline u8(
       uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3, uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
       uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15,
       uint8_t v16, uint8_t v17, uint8_t v18, uint8_t v19, uint8_t v20, uint8_t v21, uint8_t v22, uint8_t v23,
       uint8_t v24, uint8_t v25, uint8_t v26, uint8_t v27, uint8_t v28, uint8_t v29, uint8_t v30, uint8_t v31
-    ) : simd_numeric8<simd_u8,uint8_t>(_mm256_setr_epi8(
+    ) : simd_numeric8<u8,uint8_t>(_mm256_setr_epi8(
       v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10,v11,v12,v13,v14,v15,
       v16,v17,v18,v19,v20,v21,v22,v23,v24,v25,v26,v27,v28,v29,v30,v31
     )) {}
 
     // Saturated math
-    really_inline simd_u8 saturated_add(const simd_u8 other) const { return _mm256_adds_epu8(*this, other); }
-    really_inline simd_u8 saturated_sub(const simd_u8 other) const { return _mm256_subs_epu8(*this, other); }
+    really_inline u8 saturated_add(const u8 other) const { return _mm256_adds_epu8(*this, other); }
+    really_inline u8 saturated_sub(const u8 other) const { return _mm256_subs_epu8(*this, other); }
 
     // Order-specific operations
-    really_inline simd_u8 max(const simd_u8 other) const { return _mm256_max_epu8(*this, other); }
-    really_inline simd_u8 min(const simd_u8 other) const { return _mm256_min_epu8(*this, other); }
-    really_inline simd_m8 operator<=(const simd_u8 other) const { return this->max(other) == other; }
+    really_inline u8 max(const u8 other) const { return _mm256_max_epu8(*this, other); }
+    really_inline u8 min(const u8 other) const { return _mm256_min_epu8(*this, other); }
+    really_inline m8 operator<=(const u8 other) const { return this->max(other) == other; }
 
     // Bit-specific operations
-    really_inline bool any_bits_set(simd_u8 bits) const { return _mm256_testz_si256(*this, bits); }
+    really_inline bool any_bits_set(u8 bits) const { return _mm256_testz_si256(*this, bits); }
     really_inline bool any_bits_set() const { return !_mm256_testz_si256(*this, *this); }
-    really_inline simd_u8 operator>>(const int count) const { return _mm256_srli_epi16(*this, count); }
-    really_inline simd_u8 operator<<(const int count) const { return _mm256_slli_epi16(*this, count); }
-    really_inline simd_u8& operator>>=(const int count) { *this = *this >> count; return *this; }
-    really_inline simd_u8& operator<<=(const int count) { *this = *this << count; return *this; }
+    really_inline u8 operator>>(const int count) const { return _mm256_srli_epi16(*this, count); }
+    really_inline u8 operator<<(const int count) const { return _mm256_slli_epi16(*this, count); }
+    really_inline u8& operator>>=(const int count) { *this = *this >> count; return *this; }
+    really_inline u8& operator<<=(const int count) { *this = *this << count; return *this; }
   };
 
-  struct simd_u8x64 {
-    const simd_u8 chunks[2];
+  struct u8x64 {
+    const u8 chunks[2];
 
-    really_inline simd_u8x64() : chunks{simd_u8(), simd_u8()} {}
+    really_inline u8x64() : chunks{u8(), u8()} {}
 
-    really_inline simd_u8x64(const simd_t chunk0, const simd_t chunk1) : chunks{chunk0, chunk1} {}
+    really_inline u8x64(const simd_t chunk0, const simd_t chunk1) : chunks{chunk0, chunk1} {}
 
-    really_inline simd_u8x64(const uint8_t *ptr) : chunks{simd_u8::load(ptr), simd_u8::load(ptr+32)} {}
+    really_inline u8x64(const uint8_t *ptr) : chunks{u8::load(ptr), u8::load(ptr+32)} {}
 
     template <typename F>
     really_inline void each(F const& each_chunk) const
@@ -189,56 +187,51 @@ namespace simd256 {
     }
 
     template <typename F>
-    really_inline simd_u8x64 map(F const& map_chunk) const {
-      return simd_u8x64(
+    really_inline u8x64 map(F const& map_chunk) const {
+      return u8x64(
         map_chunk(this->chunks[0]),
         map_chunk(this->chunks[1])
       );
     }
 
     template <typename F>
-    really_inline simd_u8x64 map(const simd_u8x64 b, F const& map_chunk) const {
-      return simd_u8x64(
+    really_inline u8x64 map(const u8x64 b, F const& map_chunk) const {
+      return u8x64(
         map_chunk(this->chunks[0], b.chunks[0]),
         map_chunk(this->chunks[1], b.chunks[1])
       );
     }
 
     template <typename F>
-    really_inline simd_u8 reduce(F const& reduce_pair) const {
+    really_inline u8 reduce(F const& reduce_pair) const {
       return reduce_pair(this->chunks[0], this->chunks[1]);
     }
 
     really_inline uint64_t to_bitmask() const {
-      uint64_t r_lo = static_cast<uint32_t>(simd_m8(this->chunks[0]).to_bitmask());
-      uint64_t r_hi =                       simd_m8(this->chunks[1]).to_bitmask();
+      uint64_t r_lo = static_cast<uint32_t>(m8(this->chunks[0]).to_bitmask());
+      uint64_t r_hi =                       m8(this->chunks[1]).to_bitmask();
       return r_lo | (r_hi << 32);
     }
 
-    really_inline simd_u8x64 bit_or(const uint8_t m) const {
-      const simd_u8 mask = simd_u8::splat(m);
+    really_inline u8x64 bit_or(const uint8_t m) const {
+      const u8 mask = u8::splat(m);
       return this->map( [&](auto a) { return a | mask; } );
     }
 
     really_inline uint64_t eq(const uint8_t m) const {
-      const simd_u8 mask = simd_u8::splat(m);
+      const u8 mask = u8::splat(m);
       return this->map( [&](auto a) { return a == mask; } ).to_bitmask();
     }
 
     really_inline uint64_t lteq(const uint8_t m) const {
-      const simd_u8 mask = simd_u8::splat(m);
+      const u8 mask = u8::splat(m);
       return this->map( [&](auto a) { return a <= mask; } ).to_bitmask();
     }
 
-  }; // struct simd_u8x64
-}
+  }; // struct u8x64
 
-using namespace simd256;
-
-typedef simd_u8x64 simd_input;
-
-} // namespace simdjson::haswell
+} // namespace simdjson::haswell::simd
 UNTARGET_REGION
 
 #endif // IS_X86_64
-#endif // SIMDJSON_HASWELL_SIMD_INPUT_H
+#endif // SIMDJSON_HASWELL_SIMD_H

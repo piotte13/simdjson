@@ -9,7 +9,7 @@
     (defined(_MSC_VER) && defined(_M_ARM64))
 
 #include "simdjson/simdjson.h"
-#include "arm64/simd_input.h"
+#include "arm64/simd.h"
 #include <arm_neon.h>
 #include <cinttypes>
 #include <cstddef>
@@ -167,7 +167,7 @@ struct utf8_checker {
   }
 
   // Checks that all bytes are ascii
-  really_inline bool check_ascii_neon(simd_input in) {
+  really_inline bool check_ascii_neon(simd::u8x64 in) {
     // checking if the most significant bit is always equal to 0.
     uint8x16_t high_bit = vdupq_n_u8(0x80);
     uint8x16_t any_bits_on = in.reduce([&](auto a, auto b) {
@@ -180,10 +180,10 @@ struct utf8_checker {
     return vget_lane_u64(result, 0) == 0;
   }
 
-  really_inline void check_next_input(simd_input in) {
+  really_inline void check_next_input(simd::u8x64 in) {
     if (check_ascii_neon(in)) {
       // All bytes are ascii. Therefore the byte that was just before must be
-      // ascii too. We only check the byte that was just before simd_input. Nines
+      // ascii too. We only check the byte that was just before simd::u8x64. Nines
       // are arbitrary values.
       const int8x16_t verror =
           (int8x16_t){9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 1};

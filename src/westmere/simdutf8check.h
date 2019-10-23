@@ -3,7 +3,7 @@
 
 #include "simdjson/portability.h"
 #include "simdjson/simdjson.h"
-#include "westmere/simd_input.h"
+#include "westmere/simd.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -33,72 +33,72 @@ TARGET_WESTMERE
 namespace simdjson::westmere {
 
 struct processed_utf_bytes {
-  __m128i raw_bytes;
-  __m128i high_nibbles;
-  __m128i carried_continuations;
+  simd::u8 raw_bytes;
+  simd::i8 high_nibbles;
+  simd::i8 carried_continuations;
 };
 
 struct utf8_checker {
-  __m128i has_error{_mm_setzero_si128()};
-  processed_utf_bytes previous{_mm_setzero_si128(), _mm_setzero_si128(), _mm_setzero_si128()};
-
-  really_inline void add_errors(__m128i errors) {
-    this->has_error = _mm_or_si128(errors, this->has_error);
-  }
+  simd::u8 has_error;
+  processed_utf_bytes previous;
 
   // all byte values must be no larger than 0xF4
-  really_inline void check_smaller_than_0xF4(__m128i current_bytes) {
+  really_inline void check_smaller_than_0xF4(simd::u8 current_bytes) {
     // unsigned, saturates to 0 below max
-    this->add_errors( _mm_subs_epu8(current_bytes, _mm_set1_epi8(0xF4u)) );
+    this->has_error |= current_bytes.saturated_sub(0xF4u);
   }
 
-  really_inline __m128i continuation_lengths(__m128i high_nibbles) {
-    return _mm_shuffle_epi8(
-        _mm_setr_epi8(1, 1, 1, 1, 1, 1, 1, 1, // 0xxx (ASCII)
-                      0, 0, 0, 0,             // 10xx (continuation)
-                      2, 2,                   // 110x
-                      3,                      // 1110
-                      4), // 1111, next should be 0 (not checked here)
-        high_nibbles);
+  really_inline simd::i8 continuation_lengths(simd::i8 high_nibbles) {
+    return high_nibbles.lookup4(
+      1, 1, 1, 1, 1, 1, 1, 1, // 0xxx (ASCII)
+      0, 0, 0, 0,             // 10xx (continuation)
+      2, 2,                   // 110x
+      3,                      // 1110
+      4);                     // 1111, next should be 0 (not checked here)
   }
 
-  really_inline __m128i carry_continuations(__m128i initial_lengths) {
+  really_inline simd::i8 carry_continuations(simd::i8 initial_lengths) {
+    simd::i8 prev_carried_continuations = initial_lengths.prev(this->previous.carried_continuations);
+    simd::i8 right1 = simd::i8(simd::u8(prev_carried_continuations).saturated_sub(1));
+    simd::i8 sum = initial_lengths + right1;
 
-    __m128i right1 =
-        _mm_subs_epu8(_mm_alignr_epi8(initial_lengths, this->previous.carried_continuations, 16 - 1),
-                      _mm_set1_epi8(1));
-    __m128i sum = _mm_add_epi8(initial_lengths, right1);
-
-    __m128i right2 = _mm_subs_epu8(_mm_alignr_epi8(sum, this->previous.carried_continuations, 16 - 2),
-                                  _mm_set1_epi8(2));
-    return _mm_add_epi8(sum, right2);
+    simd::i8 prev2_carried_continuations = sum.prev2(this->previous.carried_continuations);
+    simd::i8 right2 = simd::i8(simd::u8(prev2_carried_continuations).saturated_sub(2));
+    return sum + right2;
   }
 
-  really_inline void check_continuations(__m128i initial_lengths, __m128i carries) {
-
+  really_inline void check_continuations(simd::i8 initial_lengths, simd::i8 carries) {
     // overlap || underlap
     // carry > length && length > 0 || !(carry > length) && !(length > 0)
     // (carries > length) == (lengths > 0)
-    __m128i overunder =
-        _mm_cmpeq_epi8(_mm_cmpgt_epi8(carries, initial_lengths),
-                      _mm_cmpgt_epi8(initial_lengths, _mm_setzero_si128()));
+    // (carries > current) == (current > 0)
+    this->has_error |= simd::u8(
+      (carries > initial_lengths) == (initial_lengths > simd::i8::zero()));
+  }
 
-    this->add_errors( overunder );
+  really_inline void check_carried_continuations() {
+    static const int8_t last_1[32] = {
+      9, 9, 9, 9, 9, 9, 9, 9,
+      9, 9, 9, 9, 9, 9, 9, 9,
+      9, 9, 9, 9, 9, 9, 9, 9,
+      9, 9, 9, 9, 9, 9, 9, 1
+    };
+    this->has_error |= simd::u8(this->previous.carried_continuations > simd::i8(last_1 + 32 - sizeof(simd::i8)));
   }
 
   // when 0xED is found, next byte must be no larger than 0x9F
   // when 0xF4 is found, next byte must be no larger than 0x8F
   // next byte must be continuation, ie sign bit is set, so signed < is ok
-  really_inline void check_first_continuation_max(__m128i current_bytes, __m128i off1_current_bytes) {
-    __m128i maskED = _mm_cmpeq_epi8(off1_current_bytes, _mm_set1_epi8(0xEDu));
-    __m128i maskF4 = _mm_cmpeq_epi8(off1_current_bytes, _mm_set1_epi8(0xF4u));
-
-    __m128i badfollowED = _mm_and_si128(
-        _mm_cmpgt_epi8(current_bytes, _mm_set1_epi8(0x9Fu)), maskED);
-    __m128i badfollowF4 = _mm_and_si128(
-        _mm_cmpgt_epi8(current_bytes, _mm_set1_epi8(0x8Fu)), maskF4);
-
-    this->add_errors( _mm_or_si128(badfollowED, badfollowF4) );
+  really_inline void check_first_continuation_max(simd::u8 current_bytes,
+                                                  simd::u8 off1_current_bytes) {
+    simd::m8 prev_ED = off1_current_bytes == 0xEDu;
+    simd::m8 prev_F4 = off1_current_bytes == 0xF4u;
+    // Check if ED is followed by A0 or greater
+    simd::m8 ED_too_large = (simd::i8(current_bytes) > simd::i8::splat(0x9Fu)) & prev_ED;
+    // Check if F4 is followed by 90 or greater
+    simd::m8 F4_too_large = (simd::i8(current_bytes) > simd::i8::splat(0x8Fu)) & prev_F4;
+    // These will also error if ED or F4 is followed by ASCII, but that's an error anyway
+    this->has_error |= simd::u8(ED_too_large | F4_too_large);
   }
 
   // map off1_hibits => error condition
@@ -107,92 +107,85 @@ struct utf8_checker {
   // E       => < E1 && < A0
   // F       => < F1 && < 90
   // else      false && false
-  really_inline void check_overlong(__m128i current_bytes,
-                                    __m128i off1_current_bytes, __m128i high_nibbles) {
-    __m128i off1_hibits = _mm_alignr_epi8(high_nibbles, this->previous.high_nibbles, 16 - 1);
-    __m128i initial_mins = _mm_shuffle_epi8(
-        _mm_setr_epi8(-128, -128, -128, -128, -128, -128, -128, -128, -128, -128,
-                      -128, -128,  // 10xx => false
-                      0xC2u, -128, // 110x
-                      0xE1u,       // 1110
-                      0xF1u),
-        off1_hibits);
+  really_inline void check_overlong(simd::u8 current_bytes,
+                                    simd::u8 off1_current_bytes,
+                                    simd::i8 high_nibbles) {
+    simd::i8 off1_high_nibbles = high_nibbles.prev(this->previous.high_nibbles);
 
-    __m128i initial_under = _mm_cmpgt_epi8(initial_mins, off1_current_bytes);
+    // Two-byte characters must start with at least C2
+    // Three-byte characters must start with at least E1
+    // Four-byte characters must start with at least F1
+    simd::i8 initial_mins = off1_high_nibbles.lookup4(
+      -128, -128, -128, -128, -128, -128, -128, -128, // 0xxx -> false
+      -128, -128, -128, -128,                         // 10xx -> false
+      0xC2u, -128,                                    // 1100 -> C2
+      0xE1u,                                          // 1110
+      0xF1u                                           // 1111
+    );
+    simd::m8 initial_under = initial_mins > simd::i8(off1_current_bytes);
 
-    __m128i second_mins = _mm_shuffle_epi8(
-        _mm_setr_epi8(-128, -128, -128, -128, -128, -128, -128, -128, -128, -128,
-                      -128, -128, // 10xx => false
-                      127, 127,   // 110x => true
-                      0xA0u,      // 1110
-                      0x90u),
-        off1_hibits);
-    __m128i second_under = _mm_cmpgt_epi8(second_mins, current_bytes);
-    this->add_errors( _mm_and_si128(initial_under, second_under) );
+    // Two-byte characters starting with at least C2 are always OK
+    // Three-byte characters starting with at least E1 must be followed by at least A0
+    // Four-byte characters starting with at least F1 must be followed by at least 90
+    simd::i8 second_mins = off1_high_nibbles.lookup4(
+      -128, -128, -128, -128, -128, -128, -128, -128, -128, // 0xxx => false
+      -128, -128, -128,                                     // 10xx => false
+      127, 127,                                             // 110x => true
+      0xA0u,                                                // 1110
+      0x90u                                                 // 1111
+    );
+    simd::m8 second_under = second_mins > simd::i8(current_bytes);
+    this->has_error |= simd::u8(initial_under & second_under);
   }
 
-  really_inline void count_nibbles(__m128i bytes, struct processed_utf_bytes *answer) {
+  really_inline void count_nibbles(simd::u8 bytes, struct processed_utf_bytes *answer) {
     answer->raw_bytes = bytes;
-    answer->high_nibbles = _mm_and_si128(_mm_srli_epi16(bytes, 4), _mm_set1_epi8(0x0F));
+    answer->high_nibbles = simd::i8((bytes >> 4) & 0x0F);
   }
 
   // check whether the current bytes are valid UTF-8
   // at the end of the function, previous gets updated
-  really_inline void check_utf8_bytes(__m128i current_bytes) {
-    struct processed_utf_bytes pb;
+  really_inline void check_utf8_bytes(simd::u8 current_bytes) {
+    struct processed_utf_bytes pb {};
     this->count_nibbles(current_bytes, &pb);
 
     this->check_smaller_than_0xF4(current_bytes);
 
-    __m128i initial_lengths = this->continuation_lengths(pb.high_nibbles);
+    simd::i8 initial_lengths = this->continuation_lengths(pb.high_nibbles);
 
     pb.carried_continuations = this->carry_continuations(initial_lengths);
 
     this->check_continuations(initial_lengths, pb.carried_continuations);
 
-    __m128i off1_current_bytes =
-        _mm_alignr_epi8(pb.raw_bytes, this->previous.raw_bytes, 16 - 1);
+    simd::u8 off1_current_bytes = pb.raw_bytes.prev(this->previous.raw_bytes);
     this->check_first_continuation_max(current_bytes, off1_current_bytes);
 
     this->check_overlong(current_bytes, off1_current_bytes, pb.high_nibbles);
     this->previous = pb;
   }
 
-  really_inline void check_carried_continuations() {
-      this->has_error = _mm_cmpgt_epi8(this->previous.carried_continuations,
-                                       _mm_setr_epi8(9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
-                                                     9, 9, 9, 9, 9, 1));
-  }
-
-  really_inline void check_next_input(__m128i in) {
-    __m128i high_bit = _mm_set1_epi8(0x80u);
-    if (_mm_testz_si128( in, high_bit) == 1) {
-      // it is ascii, we just check continuations
+  really_inline void check_next_input(simd::u8 in) {
+    if (likely(in.any_bits_set(0x80u))) {
       this->check_carried_continuations();
     } else {
-      // it is not ascii so we have to do heavy work
       this->check_utf8_bytes(in);
     }
   }
 
-  really_inline void check_next_input(simd_input in) {
-    __m128i high_bit = _mm_set1_epi8(0x80u);
-    __m128i any_bits_on = in.reduce([&](auto a, auto b) {
-      return _mm_or_si128(a, b);
-    });
-    if (_mm_testz_si128(any_bits_on, high_bit) == 1) {
-      // it is ascii, we just check continuations
+  really_inline void check_next_input(simd::u8x64 in) {
+    simd::u8 bits = in.reduce([&](auto a, auto b) { return a | b; });
+    if (likely(bits.any_bits_set(0x80u))) {
+      // it is ascii, we just check carried continuations.
       this->check_carried_continuations();
     } else {
       // it is not ascii so we have to do heavy work
-      in.each([&](auto _in) { this->check_utf8_bytes(_in); });
+      in.each([&](auto _in) { check_utf8_bytes(_in); });
     }
   }
 
   really_inline ErrorValues errors() {
-    return _mm_testz_si128(this->has_error, this->has_error) == 0 ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
+    return this->has_error.any_bits_set() ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
   }
-
 }; // struct utf8_checker
 
 } // namespace simdjson::westmere

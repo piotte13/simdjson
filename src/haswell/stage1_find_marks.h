@@ -5,7 +5,7 @@
 
 #ifdef IS_X86_64
 
-#include "haswell/simd_input.h"
+#include "haswell/simd.h"
 #include "haswell/simdutf8check.h"
 #include "simdjson/stage1_find_marks.h"
 
@@ -21,7 +21,7 @@ really_inline uint64_t compute_quote_mask(const uint64_t quote_bits) {
 }
 
 really_inline void find_whitespace_and_operators(
-  const simd_input in,
+  const simd::u8x64 in,
   uint64_t &whitespace, uint64_t &op) {
 
   #ifdef SIMDJSON_NAIVE_STRUCTURAL

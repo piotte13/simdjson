@@ -36437,7 +36437,7 @@ ParsedJson build_parsed_json(const uint8_t *buf, size_t len,
 }
 } // namespace simdjson
 /* end file src/jsonparser.cpp */
-/* begin file src/arm64/simd_input.h */
+/* begin file src/arm64/simd.h */
 #ifndef SIMDJSON_ARM64_SIMD_INPUT_H
 #define SIMDJSON_ARM64_SIMD_INPUT_H
 
@@ -36554,8 +36554,8 @@ struct simd_input {
 
 #endif // IS_ARM64
 #endif // SIMDJSON_ARM64_SIMD_INPUT_H
-/* end file src/arm64/simd_input.h */
-/* begin file src/haswell/simd_input.h */
+/* end file src/arm64/simd.h */
+/* begin file src/haswell/simd.h */
 #ifndef SIMDJSON_HASWELL_SIMD_INPUT_H
 #define SIMDJSON_HASWELL_SIMD_INPUT_H
 
@@ -36641,8 +36641,8 @@ UNTARGET_REGION
 
 #endif // IS_X86_64
 #endif // SIMDJSON_HASWELL_SIMD_INPUT_H
-/* end file src/haswell/simd_input.h */
-/* begin file src/westmere/simd_input.h */
+/* end file src/haswell/simd.h */
+/* begin file src/westmere/simd.h */
 #ifndef SIMDJSON_WESTMERE_SIMD_INPUT_H
 #define SIMDJSON_WESTMERE_SIMD_INPUT_H
 
@@ -36740,7 +36740,7 @@ UNTARGET_REGION
 
 #endif // IS_X86_64
 #endif // SIMDJSON_WESTMERE_SIMD_INPUT_H
-/* end file src/westmere/simd_input.h */
+/* end file src/westmere/simd.h */
 /* begin file src/arm64/simdutf8check.h */
 // From https://github.com/cyb70289/utf8/blob/master/lemire-neon.c
 // Adapted from https://github.com/lemire/fastvalidate-utf-8
