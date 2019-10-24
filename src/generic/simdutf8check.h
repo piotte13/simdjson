@@ -1,14 +1,3 @@
-#ifndef SIMDJSON_HASWELL_SIMDUTF8CHECK_H
-#define SIMDJSON_HASWELL_SIMDUTF8CHECK_H
-
-#include "simdjson/portability.h"
-#include "simdjson/simdjson.h"
-#include "haswell/simd.h"
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
-
-#ifdef IS_X86_64
 /*
  * legal utf-8 byte sequence
  * http://www.unicode.org/versions/Unicode6.0.0/ch03.pdf - page 94
@@ -28,9 +17,6 @@
 
 // all byte values must be no larger than 0xF4
 
-TARGET_HASWELL
-namespace simdjson::haswell {
-
 struct processed_utf_bytes {
   simd::u8 raw_bytes;
   simd::i8 high_nibbles;
@@ -44,7 +30,7 @@ struct utf8_checker {
   // all byte values must be no larger than 0xF4
   really_inline void check_smaller_than_0xF4(simd::u8 current_bytes) {
     // unsigned, saturates to 0 below max
-    this->has_error |= current_bytes.saturated_sub(0xF4u);
+    this->has_error |= current_bytes.saturating_sub(0xF4u);
   }
 
   really_inline simd::i8 continuation_lengths(simd::i8 high_nibbles) {
@@ -58,11 +44,11 @@ struct utf8_checker {
 
   really_inline simd::i8 carry_continuations(simd::i8 initial_lengths) {
     simd::i8 prev_carried_continuations = initial_lengths.prev(this->previous.carried_continuations);
-    simd::i8 right1 = simd::i8(simd::u8(prev_carried_continuations).saturated_sub(1));
+    simd::i8 right1 = simd::i8(simd::u8(prev_carried_continuations).saturating_sub(1));
     simd::i8 sum = initial_lengths + right1;
 
     simd::i8 prev2_carried_continuations = sum.prev2(this->previous.carried_continuations);
-    simd::i8 right2 = simd::i8(simd::u8(prev2_carried_continuations).saturated_sub(2));
+    simd::i8 right2 = simd::i8(simd::u8(prev2_carried_continuations).saturating_sub(2));
     return sum + right2;
   }
 
@@ -186,10 +172,3 @@ struct utf8_checker {
     return this->has_error.any_bits_set() ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
   }
 }; // struct utf8_checker
-
-}; // namespace simdjson::haswell
-UNTARGET_REGION // haswell
-
-#endif // IS_X86_64
-
-#endif // SIMDJSON_HASWELL_SIMDUTF8CHECK_H

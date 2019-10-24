@@ -153,8 +153,8 @@ namespace simdjson::haswell::simd {
     )) {}
 
     // Saturated math
-    really_inline u8 saturated_add(const u8 other) const { return _mm256_adds_epu8(*this, other); }
-    really_inline u8 saturated_sub(const u8 other) const { return _mm256_subs_epu8(*this, other); }
+    really_inline u8 saturating_add(const u8 other) const { return _mm256_adds_epu8(*this, other); }
+    really_inline u8 saturating_sub(const u8 other) const { return _mm256_subs_epu8(*this, other); }
 
     // Order-specific operations
     really_inline u8 max(const u8 other) const { return _mm256_max_epu8(*this, other); }

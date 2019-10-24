@@ -6,7 +6,6 @@
 #ifdef IS_X86_64
 
 #include "haswell/simd.h"
-#include "haswell/simdutf8check.h"
 #include "simdjson/stage1_find_marks.h"
 
 TARGET_HASWELL
@@ -84,6 +83,7 @@ really_inline void find_whitespace_and_operators(
   #endif // else SIMDJSON_NAIVE_STRUCTURAL
 }
 
+#include "generic/simdutf8check.h"
 #include "generic/stage1_find_marks.h"
 
 } // namespace haswell

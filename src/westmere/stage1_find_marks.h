@@ -6,7 +6,6 @@
 #ifdef IS_X86_64
 
 #include "westmere/simd.h"
-#include "westmere/simdutf8check.h"
 #include "simdjson/stage1_find_marks.h"
 
 TARGET_WESTMERE
@@ -40,6 +39,7 @@ really_inline void find_whitespace_and_operators(
   }).to_bitmask();
 }
 
+#include "generic/simdutf8check.h"
 #include "generic/stage1_find_marks.h"
 
 } // namespace westmere

@@ -146,8 +146,8 @@ namespace simdjson::westmere::simd {
     )) {}
 
     // Saturated math
-    really_inline u8 saturated_add(const u8 other) const { return _mm_adds_epu8(*this, other); }
-    really_inline u8 saturated_sub(const u8 other) const { return _mm_subs_epu8(*this, other); }
+    really_inline u8 saturating_add(const u8 other) const { return _mm_adds_epu8(*this, other); }
+    really_inline u8 saturating_sub(const u8 other) const { return _mm_subs_epu8(*this, other); }
 
     // Order-specific operations
     really_inline u8 max(const u8 other) const { return _mm_max_epu8(*this, other); }

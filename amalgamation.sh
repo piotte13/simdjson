@@ -23,9 +23,6 @@ $SCRIPTPATH/src/jsonparser.cpp
 $SCRIPTPATH/src/arm64/simd.h
 $SCRIPTPATH/src/haswell/simd.h
 $SCRIPTPATH/src/westmere/simd.h
-$SCRIPTPATH/src/arm64/simdutf8check.h
-$SCRIPTPATH/src/haswell/simdutf8check.h
-$SCRIPTPATH/src/westmere/simdutf8check.h
 $SCRIPTPATH/src/arm64/stage1_find_marks.h
 $SCRIPTPATH/src/haswell/stage1_find_marks.h
 $SCRIPTPATH/src/westmere/stage1_find_marks.h
