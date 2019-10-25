@@ -158,7 +158,7 @@ public:
   //
   // Backslash sequences outside of quotes will be detected in stage 2.
   //
-  really_inline uint64_t find_strings(const simd::u8x64 in) {
+  really_inline uint64_t find_strings(const simd::simd8x64<uint8_t> in) {
     const uint64_t backslash = in.eq('\\');
     const uint64_t escaped = follows_odd_sequence_of(backslash, prev_escaped);
     const uint64_t quote = in.eq('"') & ~escaped;
@@ -197,7 +197,7 @@ public:
   // contents of a string the same as content outside. Errors and structurals inside the string or on
   // the trailing quote will need to be removed later when the correct string information is known.
   //
-  really_inline uint64_t find_potential_structurals(const simd::u8x64 in) {
+  really_inline uint64_t find_potential_structurals(const simd::simd8x64<uint8_t> in) {
     // These use SIMD so let's kick them off before running the regular 64-bit stuff ...
     uint64_t whitespace, op;
     find_whitespace_and_operators(in, whitespace, op);
@@ -235,8 +235,8 @@ public:
     //
     // Load up all 128 bytes into SIMD registers
     //
-    simd::u8x64 in_1(buf);
-    simd::u8x64 in_2(buf+64);
+    simd::simd8x64<uint8_t> in_1(buf);
+    simd::simd8x64<uint8_t> in_2(buf+64);
 
     //
     // Find the strings and potential structurals (operators / primitives).

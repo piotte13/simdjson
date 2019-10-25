@@ -20,7 +20,7 @@ really_inline uint64_t compute_quote_mask(const uint64_t quote_bits) {
 }
 
 really_inline void find_whitespace_and_operators(
-  const simd::u8x64 in,
+  const simd::simd8x64<uint8_t> in,
   uint64_t &whitespace, uint64_t &op) {
 
   #ifdef SIMDJSON_NAIVE_STRUCTURAL
@@ -70,7 +70,7 @@ really_inline void find_whitespace_and_operators(
     const __m256i op_mask = _mm256_set1_epi8(32);
 
     whitespace = in.map([&](auto _in) {
-      return _in == _mm256_shuffle_epi8(white_table, _in);
+      return _mm256_cmpeq_epi8(_in, _mm256_shuffle_epi8(white_table, _in));
     }).to_bitmask();
 
     op = in.map([&](auto _in) {

@@ -20,7 +20,7 @@ really_inline uint64_t compute_quote_mask(const uint64_t quote_bits) {
 }
 
 really_inline void find_whitespace_and_operators(
-    const simd::u8x64 in,
+    const simd::simd8x64<uint8_t> in,
     uint64_t &whitespace, uint64_t &op) {
   const uint8x16_t low_nibble_mask =
       (uint8x16_t){16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0};
