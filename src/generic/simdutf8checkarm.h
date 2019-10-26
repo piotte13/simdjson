@@ -166,6 +166,7 @@ struct utf8_checker {
 
     this->check_continuations(initial_lengths, pb.carried_continuations);
 
+    // simd8<uint8_t> off1_current_bytes = pb.raw_bytes.prev(this->previous.raw_bytes);
     simd8<uint8_t> off1_current_bytes = vextq_u8(this->previous.raw_bytes, pb.raw_bytes, 16 - 1);
     this->check_first_continuation_max(current_bytes, off1_current_bytes);
 
@@ -193,6 +194,12 @@ struct utf8_checker {
   }
 
   really_inline ErrorValues errors() {
-    return this->has_error.any_bits_set() ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
+    // return this->has_error.any_bits_set() ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
+    uint64x2_t v64 = vreinterpretq_u64_u8(this->has_error);
+    uint32x2_t v32 = vqmovn_u64(v64);
+    uint64x1_t result = vreinterpret_u64_u32(v32);
+    return vget_lane_u64(result, 0) != 0 ? simdjson::UTF8_ERROR
+                                        : simdjson::SUCCESS;
+
   }
 }; // struct utf8_checker
