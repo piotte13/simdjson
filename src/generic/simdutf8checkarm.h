@@ -124,14 +124,21 @@ struct utf8_checker {
   // next byte must be continuation, ie sign bit is set, so signed < is ok
   really_inline void check_first_continuation_max(simd8<uint8_t> current_bytes,
                                                   simd8<uint8_t> off1_current_bytes) {
-    simd8<bool> prev_ED = off1_current_bytes == 0xEDu;
-    simd8<bool> prev_F4 = off1_current_bytes == 0xF4u;
-    // Check if ED is followed by A0 or greater
-    simd8<bool> ED_too_large = (simd8<int8_t>(current_bytes) > simd8<int8_t>::splat(0x9Fu)) & prev_ED;
-    // Check if F4 is followed by 90 or greater
-    simd8<bool> F4_too_large = (simd8<int8_t>(current_bytes) > simd8<int8_t>::splat(0x8Fu)) & prev_F4;
-    // These will also error if ED or F4 is followed by ASCII, but that's an error anyway
-    this->has_error |= simd8<uint8_t>(ED_too_large | F4_too_large);
+    // simd8<bool> prev_ED = off1_current_bytes == 0xEDu;
+    // simd8<bool> prev_F4 = off1_current_bytes == 0xF4u;
+    // // Check if ED is followed by A0 or greater
+    // simd8<bool> ED_too_large = (simd8<int8_t>(current_bytes) > simd8<int8_t>::splat(0x9Fu)) & prev_ED;
+    // // Check if F4 is followed by 90 or greater
+    // simd8<bool> F4_too_large = (simd8<int8_t>(current_bytes) > simd8<int8_t>::splat(0x8Fu)) & prev_F4;
+    // // These will also error if ED or F4 is followed by ASCII, but that's an error anyway
+    // this->has_error |= simd8<uint8_t>(ED_too_large | F4_too_large);
+    uint8x16_t maskED = vceqq_s8(vreinterpretq_s8_u8(off1_current_bytes), vdupq_n_s8(0xED));
+    uint8x16_t maskF4 = vceqq_s8(vreinterpretq_s8_u8(off1_current_bytes), vdupq_n_s8(0xF4));
+
+    uint8x16_t badfollowED = vandq_u8(vcgtq_s8(vreinterpretq_s8_u8(current_bytes), vdupq_n_s8(0x9F)), maskED);
+    uint8x16_t badfollowF4 = vandq_u8(vcgtq_s8(vreinterpretq_s8_u8(current_bytes), vdupq_n_s8(0x8F)), maskF4);
+
+    this->has_error |= vorrq_u8(badfollowED, badfollowF4);
   }
 
   // map off1_hibits => error condition
