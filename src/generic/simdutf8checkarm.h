@@ -45,13 +45,22 @@ struct utf8_checker {
   }
 
   really_inline simd8<int8_t> carry_continuations(simd8<int8_t> initial_lengths) {
-    simd8<int8_t> prev_carried_continuations = initial_lengths.prev(this->previous.carried_continuations);
-    simd8<int8_t> right1 = simd8<int8_t>(simd8<uint8_t>(prev_carried_continuations).saturating_sub(1));
-    simd8<int8_t> sum = initial_lengths + right1;
+    // simd8<int8_t> prev_carried_continuations = initial_lengths.prev(this->previous.carried_continuations);
+    // simd8<int8_t> right1 = simd8<int8_t>(simd8<uint8_t>(prev_carried_continuations).saturating_sub(1));
+    // simd8<int8_t> sum = initial_lengths + right1;
 
-    simd8<int8_t> prev2_carried_continuations = sum.prev<2>(this->previous.carried_continuations);
-    simd8<int8_t> right2 = simd8<int8_t>(simd8<uint8_t>(prev2_carried_continuations).saturating_sub(2));
-    return sum + right2;
+    // simd8<int8_t> prev2_carried_continuations = sum.prev<2>(this->previous.carried_continuations);
+    // simd8<int8_t> right2 = simd8<int8_t>(simd8<uint8_t>(prev2_carried_continuations).saturating_sub(2));
+    // return sum + right2;
+    int8x16_t right1 = vreinterpretq_s8_u8(vqsubq_u8(
+        vreinterpretq_u8_s8(vextq_s8(this->previous.carried_continuations, initial_lengths, 16 - 1)),
+        vdupq_n_u8(1)));
+    int8x16_t sum = vaddq_s8(initial_lengths, right1);
+
+    int8x16_t right2 = vreinterpretq_s8_u8(
+        vqsubq_u8(vreinterpretq_u8_s8(vextq_s8(this->previous.carried_continuations, sum, 16 - 2)),
+                  vdupq_n_u8(2)));
+    return vaddq_s8(sum, right2);
   }
 
   really_inline void check_continuations(simd8<int8_t> initial_lengths, simd8<int8_t> carries) {
