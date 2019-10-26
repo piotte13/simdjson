@@ -59,8 +59,12 @@ struct utf8_checker {
     // carry > length && length > 0 || !(carry > length) && !(length > 0)
     // (carries > length) == (lengths > 0)
     // (carries > current) == (current > 0)
-    this->has_error |= simd8<uint8_t>(
-      (carries > initial_lengths) == (initial_lengths > simd8<int8_t>::zero()));
+    // this->has_error |= simd8<uint8_t>(
+    //   (carries > initial_lengths) == (initial_lengths > simd8<int8_t>::zero()));
+    uint8x16_t overunder = vceqq_u8(vcgtq_s8(carries, initial_lengths),
+                                    vcgtq_s8(initial_lengths, vdupq_n_s8(0)));
+
+    this->has_error |= overunder;
   }
 
   really_inline void check_carried_continuations() {
