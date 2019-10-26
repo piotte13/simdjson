@@ -47,7 +47,7 @@ really_inline void find_whitespace_and_operators(
   }).to_bitmask();
 }
 
-#include "generic/simdutf8check.h"
+#include "generic/simdutf8checkarm.h"
 #include "generic/stage1_find_marks.h"
 
 } // namespace simdjson::arm64
