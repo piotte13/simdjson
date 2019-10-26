@@ -104,13 +104,19 @@ struct utf8_checker {
   }
 
   really_inline void check_carried_continuations() {
-    static const int8_t last_1[32] = {
-      9, 9, 9, 9, 9, 9, 9, 9,
-      9, 9, 9, 9, 9, 9, 9, 9,
-      9, 9, 9, 9, 9, 9, 9, 9,
-      9, 9, 9, 9, 9, 9, 9, 1
-    };
-    this->has_error |= simd8<uint8_t>(this->previous.carried_continuations > simd8<int8_t>(last_1 + 32 - sizeof(simd8<int8_t>)));
+    // static const int8_t last_1[32] = {
+    //   9, 9, 9, 9, 9, 9, 9, 9,
+    //   9, 9, 9, 9, 9, 9, 9, 9,
+    //   9, 9, 9, 9, 9, 9, 9, 9,
+    //   9, 9, 9, 9, 9, 9, 9, 1
+    // };
+    // this->has_error |= simd8<uint8_t>(this->previous.carried_continuations > simd8<int8_t>(last_1 + 32 - sizeof(simd8<int8_t>)));
+      // All bytes are ascii. Therefore the byte that was just before must be
+      // ascii too. We only check the byte that was just before simd_input. Nines
+      // are arbitrary values.
+      const int8x16_t verror =
+          (int8x16_t){9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 1};
+      this->has_error |= vcgtq_s8(this->previous.carried_continuations, verror);
   }
 
   // when 0xED is found, next byte must be no larger than 0x9F
