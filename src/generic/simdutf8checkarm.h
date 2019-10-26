@@ -196,22 +196,38 @@ struct utf8_checker {
   // check whether the current bytes are valid UTF-8
   // at the end of the function, previous gets updated
   really_inline void check_utf8_bytes(simd8<uint8_t> current_bytes) {
-    struct processed_utf_bytes pb {};
+    // struct processed_utf_bytes pb {};
+    // this->count_nibbles(current_bytes, &pb);
+
+    // this->check_smaller_than_0xF4(current_bytes);
+
+    // simd8<int8_t> initial_lengths = this->continuation_lengths(pb.high_nibbles);
+
+    // pb.carried_continuations = this->carry_continuations(initial_lengths);
+
+    // this->check_continuations(initial_lengths, pb.carried_continuations);
+
+    // // simd8<uint8_t> off1_current_bytes = pb.raw_bytes.prev(this->previous.raw_bytes);
+    // simd8<uint8_t> off1_current_bytes = vextq_u8(this->previous.raw_bytes, pb.raw_bytes, 16 - 1);
+    // this->check_first_continuation_max(current_bytes, off1_current_bytes);
+
+    // this->check_overlong(current_bytes, off1_current_bytes, pb.high_nibbles);
+    // this->previous = pb;
+    struct processed_utf_bytes pb{};
     this->count_nibbles(current_bytes, &pb);
 
     this->check_smaller_than_0xF4(current_bytes);
 
-    simd8<int8_t> initial_lengths = this->continuation_lengths(pb.high_nibbles);
+    int8x16_t initial_lengths = this->continuation_lengths(pb.high_nibbles);
 
     pb.carried_continuations = this->carry_continuations(initial_lengths);
 
     this->check_continuations(initial_lengths, pb.carried_continuations);
 
-    // simd8<uint8_t> off1_current_bytes = pb.raw_bytes.prev(this->previous.raw_bytes);
-    simd8<uint8_t> off1_current_bytes = vextq_u8(this->previous.raw_bytes, pb.raw_bytes, 16 - 1);
-    this->check_first_continuation_max(current_bytes, off1_current_bytes);
+    int8x16_t off1_current_bytes = vextq_s8(vreinterpretq_s8_u8(this->previous.raw_bytes), vreinterpretq_s8_u8(pb.raw_bytes), 16 - 1);
+    this->check_first_continuation_max(current_bytes, vreinterpretq_u8_s8(off1_current_bytes));
 
-    this->check_overlong(current_bytes, off1_current_bytes, pb.high_nibbles);
+    this->check_overlong(current_bytes, vreinterpretq_u8_s8(off1_current_bytes), pb.high_nibbles);
     this->previous = pb;
   }
 
