@@ -24,6 +24,13 @@ struct processed_utf_bytes {
   simd8<int8_t> high_nibbles;
   simd8<int8_t> carried_continuations;
 };
+static const int8_t _nibbles[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, // 0xxx (ASCII)
+    0, 0, 0, 0,             // 10xx (continuation)
+    2, 2,                   // 110x
+    3,                      // 1110
+    4,                      // 1111, next should be 0 (not checked here)
+};
 
 struct utf8_checker {
   simd8<uint8_t> has_error;
@@ -36,12 +43,13 @@ struct utf8_checker {
   }
 
   really_inline simd8<int8_t> continuation_lengths(simd8<int8_t> high_nibbles) {
-    return high_nibbles.lookup4<int8_t>(
-      1, 1, 1, 1, 1, 1, 1, 1, // 0xxx (ASCII)
-      0, 0, 0, 0,             // 10xx (continuation)
-      2, 2,                   // 110x
-      3,                      // 1110
-      4);                     // 1111, next should be 0 (not checked here)
+    // return high_nibbles.lookup4<int8_t>(
+    //   1, 1, 1, 1, 1, 1, 1, 1, // 0xxx (ASCII)
+    //   0, 0, 0, 0,             // 10xx (continuation)
+    //   2, 2,                   // 110x
+    //   3,                      // 1110
+    //   4);                     // 1111, next should be 0 (not checked here)
+    return vqtbl1q_s8(vld1q_s8(_nibbles), vreinterpretq_u8_s8(high_nibbles));
   }
 
   really_inline simd8<int8_t> carry_continuations(simd8<int8_t> initial_lengths) {
