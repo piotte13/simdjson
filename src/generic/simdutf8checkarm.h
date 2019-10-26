@@ -56,7 +56,9 @@ struct utf8_checker {
   // all byte values must be no larger than 0xF4
   really_inline void check_smaller_than_0xF4(simd8<uint8_t> current_bytes) {
     // unsigned, saturates to 0 below max
-    this->has_error |= current_bytes.saturating_sub(0xF4u);
+    // this->has_error |= current_bytes.saturating_sub(0xF4u);
+    // unsigned, saturates to 0 below max
+    this->has_error |= vqsubq_u8(current_bytes, vdupq_n_u8(0xF4));
   }
 
   really_inline simd8<int8_t> continuation_lengths(simd8<int8_t> high_nibbles) {
