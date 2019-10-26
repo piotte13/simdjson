@@ -161,7 +161,7 @@ struct utf8_checker {
 
   really_inline void check_next_input(simd8x64<uint8_t> in) {
     simd8<uint8_t> bits = in.reduce([&](auto a, auto b) { return a | b; });
-    if (likely(bits.any_bits_set(0x80u))) {
+    if (likely(!bits.any_bits_set(0x80u))) {
       // it is ascii, we just check carried continuations.
       this->check_carried_continuations();
     } else {

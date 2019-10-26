@@ -239,14 +239,24 @@ struct utf8_checker {
       return vorrq_u8(a, b);
     });
     uint8x16_t high_bit_on = vandq_u8(any_bits_on, high_bit);
+    // return vqmaxq_u8(high_bit_on) == 0;
     uint64x2_t v64 = vreinterpretq_u64_u8(high_bit_on);
     uint32x2_t v32 = vqmovn_u64(v64);
     uint64x1_t result = vreinterpret_u64_u32(v32);
     return vget_lane_u64(result, 0) == 0;
   }
 
+  really_inline void check_next_input(simd8<uint8_t> in) {
+    if (likely(in.any_bits_set(0x80u))) {
+      this->check_carried_continuations();
+    } else {
+      this->check_utf8_bytes(in);
+    }
+  }
+
   really_inline void check_next_input(simd8x64<uint8_t> in) {
-    if (check_ascii_neon(in)) {
+    simd8<uint8_t> bits = in.reduce([&](auto a, auto b) { return a | b; });
+    if (likely(!bits.any_bits_set(0x80u))) {
       // it is ascii, we just check carried continuations.
       this->check_carried_continuations();
     } else {
