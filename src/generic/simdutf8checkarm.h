@@ -24,12 +24,29 @@ struct processed_utf_bytes {
   simd8<int8_t> high_nibbles;
   simd8<int8_t> carried_continuations;
 };
+
 static const int8_t _nibbles[] = {
     1, 1, 1, 1, 1, 1, 1, 1, // 0xxx (ASCII)
     0, 0, 0, 0,             // 10xx (continuation)
     2, 2,                   // 110x
     3,                      // 1110
     4,                      // 1111, next should be 0 (not checked here)
+};
+
+static const int8_t _initial_mins[] = {
+    -128,         -128, -128, -128, -128, -128,
+    -128,         -128, -128, -128, -128, -128, // 10xx => false
+    (int8_t)0xC2, -128,                         // 110x
+    (int8_t)0xE1,                               // 1110
+    (int8_t)0xF1,
+};
+
+static const int8_t _second_mins[] = {
+    -128,         -128, -128, -128, -128, -128,
+    -128,         -128, -128, -128, -128, -128, // 10xx => false
+    127,          127,                          // 110x => true
+    (int8_t)0xA0,                               // 1110
+    (int8_t)0x90,
 };
 
 struct utf8_checker {
@@ -118,32 +135,41 @@ struct utf8_checker {
   really_inline void check_overlong(simd8<uint8_t> current_bytes,
                                     simd8<uint8_t> off1_current_bytes,
                                     simd8<int8_t> high_nibbles) {
-    simd8<int8_t> off1_high_nibbles = high_nibbles.prev(this->previous.high_nibbles);
+    // simd8<int8_t> off1_high_nibbles = high_nibbles.prev(this->previous.high_nibbles);
 
-    // Two-byte characters must start with at least C2
-    // Three-byte characters must start with at least E1
-    // Four-byte characters must start with at least F1
-    simd8<int8_t> initial_mins = off1_high_nibbles.lookup4<int8_t>(
-      -128, -128, -128, -128, -128, -128, -128, -128, // 0xxx -> false
-      -128, -128, -128, -128,                         // 10xx -> false
-      0xC2, -128,                                     // 1100 -> C2
-      0xE1,                                           // 1110
-      0xF1                                            // 1111
-    );
-    simd8<bool> initial_under = initial_mins > simd8<int8_t>(off1_current_bytes);
+    // // Two-byte characters must start with at least C2
+    // // Three-byte characters must start with at least E1
+    // // Four-byte characters must start with at least F1
+    // simd8<int8_t> initial_mins = off1_high_nibbles.lookup4<int8_t>(
+    //   -128, -128, -128, -128, -128, -128, -128, -128, // 0xxx -> false
+    //   -128, -128, -128, -128,                         // 10xx -> false
+    //   0xC2, -128,                                     // 1100 -> C2
+    //   0xE1,                                           // 1110
+    //   0xF1                                            // 1111
+    // );
+    // simd8<bool> initial_under = initial_mins > simd8<int8_t>(off1_current_bytes);
 
-    // Two-byte characters starting with at least C2 are always OK
-    // Three-byte characters starting with at least E1 must be followed by at least A0
-    // Four-byte characters starting with at least F1 must be followed by at least 90
-    simd8<int8_t> second_mins = off1_high_nibbles.lookup4<int8_t>(
-      -128, -128, -128, -128, -128, -128, -128, -128, -128, // 0xxx => false
-      -128, -128, -128,                                     // 10xx => false
-      127, 127,                                             // 110x => true
-      0xA0,                                                 // 1110
-      0x90                                                  // 1111
-    );
-    simd8<bool> second_under = second_mins > simd8<int8_t>(current_bytes);
-    this->has_error |= simd8<uint8_t>(initial_under & second_under);
+    // // Two-byte characters starting with at least C2 are always OK
+    // // Three-byte characters starting with at least E1 must be followed by at least A0
+    // // Four-byte characters starting with at least F1 must be followed by at least 90
+    // simd8<int8_t> second_mins = off1_high_nibbles.lookup4<int8_t>(
+    //   -128, -128, -128, -128, -128, -128, -128, -128, -128, // 0xxx => false
+    //   -128, -128, -128,                                     // 10xx => false
+    //   127, 127,                                             // 110x => true
+    //   0xA0,                                                 // 1110
+    //   0x90                                                  // 1111
+    // );
+    // simd8<bool> second_under = second_mins > simd8<int8_t>(current_bytes);
+    // this->has_error |= simd8<uint8_t>(initial_under & second_under);
+    int8x16_t off1_high_nibbles = vextq_s8(this->previous.high_nibbles, high_nibbles, 16 - 1);
+    int8x16_t initial_mins =
+        vqtbl1q_s8(vld1q_s8(_initial_mins), vreinterpretq_u8_s8(off1_high_nibbles));
+
+    uint8x16_t initial_under = vcgtq_s8(initial_mins, vreinterpretq_s8_u8(off1_current_bytes));
+
+    int8x16_t second_mins = vqtbl1q_s8(vld1q_s8(_second_mins), vreinterpretq_u8_s8(off1_high_nibbles));
+    uint8x16_t second_under = vcgtq_s8(second_mins, vreinterpretq_s8_u8(current_bytes));
+    this->has_error |= vandq_u8(initial_under, second_under);
   }
 
   really_inline void count_nibbles(simd8<uint8_t> bytes, struct processed_utf_bytes *answer) {
