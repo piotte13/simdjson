@@ -166,7 +166,7 @@ struct utf8_checker {
 
     this->check_continuations(initial_lengths, pb.carried_continuations);
 
-    simd8<uint8_t> off1_current_bytes = pb.raw_bytes.prev(this->previous.raw_bytes);
+    simd8<uint8_t> off1_current_bytes = vextq_u8(this->previous.raw_bytes, pb.raw_bytes, 16 - 1);
     this->check_first_continuation_max(current_bytes, off1_current_bytes);
 
     this->check_overlong(current_bytes, off1_current_bytes, pb.high_nibbles);
