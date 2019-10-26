@@ -231,17 +231,22 @@ struct utf8_checker {
     this->previous = pb;
   }
 
-  really_inline void check_next_input(simd8<uint8_t> in) {
-    if (likely(in.any_bits_set(0x80u))) {
-      this->check_carried_continuations();
-    } else {
-      this->check_utf8_bytes(in);
-    }
+  // Checks that all bytes are ascii
+  really_inline bool check_ascii_neon(simd8x64<uint8_t> in) {
+    // checking if the most significant bit is always equal to 0.
+    uint8x16_t high_bit = vdupq_n_u8(0x80);
+    uint8x16_t any_bits_on = in.reduce([&](auto a, auto b) {
+      return vorrq_u8(a, b);
+    });
+    uint8x16_t high_bit_on = vandq_u8(any_bits_on, high_bit);
+    uint64x2_t v64 = vreinterpretq_u64_u8(high_bit_on);
+    uint32x2_t v32 = vqmovn_u64(v64);
+    uint64x1_t result = vreinterpret_u64_u32(v32);
+    return vget_lane_u64(result, 0) == 0;
   }
 
   really_inline void check_next_input(simd8x64<uint8_t> in) {
-    simd8<uint8_t> bits = in.reduce([&](auto a, auto b) { return a | b; });
-    if (likely(bits.any_bits_set(0x80u))) {
+    if (check_ascii_neon(in)) {
       // it is ascii, we just check carried continuations.
       this->check_carried_continuations();
     } else {
