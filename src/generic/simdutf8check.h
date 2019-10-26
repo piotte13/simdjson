@@ -127,7 +127,7 @@ struct utf8_checker {
 
   really_inline void count_nibbles(simd8<uint8_t> bytes, struct processed_utf_bytes *answer) {
     answer->raw_bytes = bytes;
-    answer->high_nibbles = simd8<int8_t>(bytes.shr<4>() & 0x0F);
+    answer->high_nibbles = simd8<int8_t>(bytes.shr<4>());
   }
 
   // check whether the current bytes are valid UTF-8

@@ -167,9 +167,9 @@ namespace simdjson::haswell::simd {
     really_inline bool any_bits_set(simd8<uint8_t> bits) const { return _mm256_testz_si256(*this, bits); }
     really_inline bool any_bits_set() const { return !_mm256_testz_si256(*this, *this); }
     template<int N>
-    really_inline simd8<uint8_t> shr() const { return _mm256_srli_epi16(*this, N); }
+    really_inline simd8<uint8_t> shr() const { return _mm256_srli_epi16(*this, N) & uint8_t(0xFFu >> N); }
     template<int N>
-    really_inline simd8<uint8_t> shl() const { return _mm256_slli_epi16(*this, N); }
+    really_inline simd8<uint8_t> shl() const { return _mm256_slli_epi16(*this, N) & uint8_t(0xFFu << N); }
   };
 
   template<typename T>
