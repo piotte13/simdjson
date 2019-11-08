@@ -8,6 +8,7 @@
 #include "arm64/bitmask.h"
 #include "arm64/simd.h"
 #include "simdjson/stage1_find_marks.h"
+#include "arm64/simdutf8check.h"
 
 namespace simdjson::arm64 {
 
@@ -29,7 +30,6 @@ really_inline void find_whitespace_and_operators(
   whitespace = v.map([&](simd8<uint8_t> _v) { return _v.any_bits_set(0x18); }).to_bitmask();
 }
 
-#include "generic/simdutf8check.h"
 #include "generic/stage1_find_marks.h"
 
 } // namespace simdjson::arm64
