@@ -47,7 +47,8 @@ set(SIMDJSON_SRC_HEADERS
   generic/stage2_build_tape.h
   generic/stage2_streaming_build_tape.h
   generic/stringparsing.h
-  generic/simdutf8check.h
+  generic/utf8_zwegner_algorithm.h
+  generic/utf8_fastvalidate_algorithm.h
   haswell/bitmask.h
   haswell/simd.h
   haswell/stage1_find_marks.h
