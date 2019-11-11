@@ -91,6 +91,16 @@ namespace simdjson::arm64::simd {
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
     }) {}
+    // Repeat 16 values as many times as necessary (usually for lookup tables)
+    really_inline static simd8<uint8_t> repeat_16(
+      uint8_t v0,  uint8_t v1,  uint8_t v2,  uint8_t v3,  uint8_t v4,  uint8_t v5,  uint8_t v6,  uint8_t v7,
+      uint8_t v8,  uint8_t v9,  uint8_t v10, uint8_t v11, uint8_t v12, uint8_t v13, uint8_t v14, uint8_t v15
+    ) {
+      return simd8<uint8_t>(
+        v0, v1, v2, v3, v4, v5, v6, v7,
+        v8, v9, v10,v11,v12,v13,v14,v15
+      );
+    }
 
     // Store to array
     really_inline void store(uint8_t dst[16]) { return vst1q_u8(dst, *this); }
@@ -109,6 +119,8 @@ namespace simdjson::arm64::simd {
     really_inline simd8<uint8_t> max(const simd8<uint8_t> other) const { return vmaxq_u8(*this, other); }
     really_inline simd8<uint8_t> min(const simd8<uint8_t> other) const { return vminq_u8(*this, other); }
     really_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return vcleq_u8(*this, other); }
+    really_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return vcgeq_u8(*this, other); }
+    really_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return vcgtq_u8(*this, other); }
 
     // Bit-specific operations
     really_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return vtstq_u8(*this, bits); }
@@ -121,33 +133,40 @@ namespace simdjson::arm64::simd {
 
     // Perform a lookup assuming no value is larger than 16
     template<typename L>
+    really_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+      return lookup_table.apply_lookup_16_to(*this);
+    }
+    template<typename L>
     really_inline simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      simd8<L> lookup_table(
+      return lookup_16(simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
         replace12, replace13, replace14, replace15
-      );
-      return lookup_table.apply_lookup_16_to(*this);
+      ));
     }
 
     // Perform a lookup of the lower 4 bits
+    template<typename L>
+    really_inline simd8<L> lookup_lower_4_bits(simd8<L> lookup_table) const {
+      return lookup_table.apply_lookup_16_to(*this & 0xF);
+    }
     template<typename L>
     really_inline simd8<L> lookup_lower_4_bits(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return (*this & 0xF).lookup_16(
+      return lookup_lower_4_bits(simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
         replace12, replace13, replace14, replace15
-      );
+      ));
     }
 
     really_inline simd8<uint8_t> apply_lookup_16_to(const simd8<uint8_t> original) {
@@ -182,7 +201,17 @@ namespace simdjson::arm64::simd {
     ) : simd8(int8x16_t{
       v0, v1, v2, v3, v4, v5, v6, v7,
       v8, v9, v10,v11,v12,v13,v14,v15
-     }) {}
+    }) {}
+    // Repeat 16 values as many times as necessary (usually for lookup tables)
+    really_inline static simd8<int8_t> repeat_16(
+      int8_t v0,  int8_t v1,  int8_t v2,  int8_t v3,  int8_t v4,  int8_t v5,  int8_t v6,  int8_t v7,
+      int8_t v8,  int8_t v9,  int8_t v10, int8_t v11, int8_t v12, int8_t v13, int8_t v14, int8_t v15
+    ) {
+      return simd8<int8_t>(
+        v0, v1, v2, v3, v4, v5, v6, v7,
+        v8, v9, v10,v11,v12,v13,v14,v15
+      );
+    }
 
     // Store to array
     really_inline void store(int8_t dst[16]) { return vst1q_s8(dst, *this); }
@@ -208,19 +237,23 @@ namespace simdjson::arm64::simd {
       return vextq_s8(prev_chunk, *this, 16 - N);
     }
 
-    // Perform a lookup of the lower 4 bits
+    // Perform a lookup assuming no value is larger than 16
+    template<typename L>
+    really_inline simd8<L> lookup_16(simd8<L> lookup_table) const {
+      return lookup_table.apply_lookup_16_to(*this);
+    }
     template<typename L>
     really_inline simd8<L> lookup_16(
         L replace0,  L replace1,  L replace2,  L replace3,
         L replace4,  L replace5,  L replace6,  L replace7,
         L replace8,  L replace9,  L replace10, L replace11,
         L replace12, L replace13, L replace14, L replace15) const {
-      return simd8<uint8_t>(*this).lookup_16(
+      return lookup_16(simd8<L>::repeat_16(
         replace0,  replace1,  replace2,  replace3,
         replace4,  replace5,  replace6,  replace7,
         replace8,  replace9,  replace10, replace11,
         replace12, replace13, replace14, replace15
-      );
+      ));
     }
 
     really_inline simd8<int8_t> apply_lookup_16_to(const simd8<uint8_t> original) {
