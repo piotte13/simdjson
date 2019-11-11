@@ -77,6 +77,18 @@ namespace simdjson::haswell::simd {
     static really_inline simd8<T> load(const T values[32]) {
       return _mm256_loadu_si256(reinterpret_cast<const __m256i *>(values));
     }
+    // Repeat 16 values as many times as necessary (usually for lookup tables)
+    static really_inline simd8<T> repeat_16(
+      T v0,  T v1,  T v2,  T v3,  T v4,  T v5,  T v6,  T v7,
+      T v8,  T v9,  T v10, T v11, T v12, T v13, T v14, T v15
+    ) {
+      return simd8<T>(
+        v0, v1, v2, v3, v4, v5, v6, v7,
+        v8, v9, v10,v11,v12,v13,v14,v15,
+        v0, v1, v2, v3, v4, v5, v6, v7,
+        v8, v9, v10,v11,v12,v13,v14,v15
+      );
+    }
 
     really_inline base8_numeric() : base8<T>() {}
     really_inline base8_numeric(const __m256i _value) : base8<T>(_value) {}
@@ -192,12 +204,16 @@ namespace simdjson::haswell::simd {
     really_inline simd8<uint8_t> max(const simd8<uint8_t> other) const { return _mm256_max_epu8(*this, other); }
     really_inline simd8<uint8_t> min(const simd8<uint8_t> other) const { return _mm256_min_epu8(*this, other); }
     really_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max(*this) == other; }
+    really_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min(*this) == other; }
+    really_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->saturating_sub(other).any_bits_set(); }
 
     // Bit-specific operations
-    really_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set(); }
     really_inline simd8<bool> any_bits_set() const { return ~(*this == uint8_t(0)); }
-    really_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !_mm256_testz_si256(*this, bits); }
-    really_inline bool any_bits_set_anywhere() const { return !_mm256_testz_si256(*this, *this); }
+    really_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set(); }
+    really_inline bool bits_not_set_anywhere() const { return _mm256_testz_si256(*this, *this); }
+    really_inline bool any_bits_set_anywhere() const { return !bits_not_set_anywhere(); }
+    really_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return _mm256_testz_si256(*this, bits); }
+    really_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return !bits_not_set_anywhere(bits); }
     template<int N>
     really_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm256_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
