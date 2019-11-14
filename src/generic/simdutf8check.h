@@ -253,23 +253,104 @@ really_inline simd8<uint8_t> check_eof(simd8<uint8_t> prev_input) {
   return prev_input.saturating_sub(max_value);
 }
 
-really_inline simd8<uint8_t> check_input(simd8<uint8_t> input, simd8<uint8_t> prev_input) {
+really_inline simd8<uint8_t> check_input(simd8<uint8_t> input1, simd8<uint8_t> prev_input) {
   // Total: 9 simd constants
   // - ASCII: 3 instructions, 2 simd constants
   // - UTF-8: 24 instructions, 8 simd constants
-  if (likely(!input.any_bits_set_anywhere(0b10000000u))) {
+  simd8<uint8_t> bits = input1;
+  if (likely(!bits.any_bits_set_anywhere(0b10000000u))) {
     // This has the same semantics as EOF: we only have to check for multibyte characters in part
     // 1 that got cut off
     return check_eof(prev_input);
   } else {
-    return check_utf8_bytes(input, prev_input);
+    return check_utf8_bytes(input1, prev_input);
   }
+}
+really_inline simd8<uint8_t> check_input(simd8<uint8_t> input1, simd8<uint8_t> input2, simd8<uint8_t> prev_input) {
+  // Total: 9 simd constants
+  // - ASCII: 3 instructions, 2 simd constants
+  // - UTF-8: 24 instructions, 8 simd constants
+  simd8<uint8_t> bits = input1 | input2;
+  if (likely(!bits.any_bits_set_anywhere(0b10000000u))) {
+    // This has the same semantics as EOF: we only have to check for multibyte characters in part
+    // 1 that got cut off
+    return check_eof(prev_input);
+  } else {
+    return check_utf8_bytes(input1, prev_input) |
+           check_utf8_bytes(input2, input1);
+  }
+}
+really_inline simd8<uint8_t> check_input(simd8<uint8_t> input1, simd8<uint8_t> input2, simd8<uint8_t> input3, simd8<uint8_t> input4, simd8<uint8_t> prev_input) {
+  // Total: 9 simd constants
+  // - ASCII: 3 instructions, 2 simd constants
+  // - UTF-8: 24 instructions, 8 simd constants
+  simd8<uint8_t> bits = input1 | input2 | input3 | input4;
+  if (likely(!bits.any_bits_set_anywhere(0b10000000u))) {
+    // This has the same semantics as EOF: we only have to check for multibyte characters in part
+    // 1 that got cut off
+    return check_eof(prev_input);
+  } else {
+    return check_utf8_bytes(input1, prev_input) |
+           check_utf8_bytes(input2, input1) |
+           check_utf8_bytes(input3, input2) |
+           check_utf8_bytes(input4, input3);
+  }
+}
+really_inline simd8<uint8_t> check_input(simd8<uint8_t> input1, simd8<uint8_t> input2, simd8<uint8_t> input3, simd8<uint8_t> input4, simd8<uint8_t> input5, simd8<uint8_t> input6, simd8<uint8_t> input7, simd8<uint8_t> input8, simd8<uint8_t> prev_input) {
+  // Total: 9 simd constants
+  // - ASCII: 3 instructions, 2 simd constants
+  // - UTF-8: 24 instructions, 8 simd constants
+  simd8<uint8_t> bits = input1 | input2 | input3 | input4 | input5 | input6 | input7 | input8;
+  if (likely(!bits.any_bits_set_anywhere(0b10000000u))) {
+    // This has the same semantics as EOF: we only have to check for multibyte characters in part
+    // 1 that got cut off
+    return check_eof(prev_input);
+  } else {
+    return check_utf8_bytes(input1, prev_input) |
+           check_utf8_bytes(input2, input1) |
+           check_utf8_bytes(input3, input2) |
+           check_utf8_bytes(input4, input3) |
+           check_utf8_bytes(input5, input4) |
+           check_utf8_bytes(input6, input5) |
+           check_utf8_bytes(input7, input6) |
+           check_utf8_bytes(input8, input7);
+  }
+}
+
+template<int N=simd8x64<uint8_t>::NUM_CHUNKS>
+really_inline simd8<uint8_t> check_input(simd8x64<uint8_t> input, simd8<uint8_t> &prev_input);
+template<>
+really_inline simd8<uint8_t> check_input<2>(simd8x64<uint8_t> input, simd8<uint8_t> &prev_input) {
+  simd8<uint8_t> error = check_input(input.chunks[0], input.chunks[1], prev_input);
+  prev_input = input.chunks[1];
+  return error;
+}
+template<>
+really_inline simd8<uint8_t> check_input<4>(simd8x64<uint8_t> input, simd8<uint8_t> &prev_input) {
+  simd8<uint8_t> error = check_input(input.chunks[0], input.chunks[1], input.chunks[2], input.chunks[3], prev_input);
+  prev_input = input.chunks[3];
+  return error;
+}
+
+template<int N=simd8x64<uint8_t>::NUM_CHUNKS>
+really_inline simd8<uint8_t> check_input(simd8x64<uint8_t> input, simd8x64<uint8_t> input2, simd8<uint8_t> &prev_input);
+template<>
+really_inline simd8<uint8_t> check_input<2>(simd8x64<uint8_t> input, simd8x64<uint8_t> input2, simd8<uint8_t> &prev_input) {
+  simd8<uint8_t> error = check_input(input.chunks[0], input.chunks[1], input2.chunks[0], input2.chunks[1], prev_input);
+  prev_input = input2.chunks[1];
+  return error;
+}
+template<>
+really_inline simd8<uint8_t> check_input<4>(simd8x64<uint8_t> input, simd8x64<uint8_t> input2, simd8<uint8_t> &prev_input) {
+  simd8<uint8_t> error = check_input(input.chunks[0], input.chunks[1], input.chunks[2], input.chunks[3], input2.chunks[0], input2.chunks[1], input2.chunks[2], input2.chunks[3], prev_input);
+  prev_input = input2.chunks[3];
+  return error;
 }
 
 } // namespace utf8_validation
 
 struct utf8_checker {
-  simd8<uint8_t> has_error;
+  simd8<uint8_t> error;
   simd8<uint8_t> prev_input;
 
   really_inline void check_next_input(simd8x64<uint8_t> input) {
@@ -281,27 +362,19 @@ struct utf8_checker {
     // - ASCII: 6 instructions, 2 simd constants
     // - UTF-8: 93 instructions, 8 simd constants (7 of them used four times)
 
-    // TODO it should be faster to call check_input(simd8<uint8_t>) on each register ... it does
-    // fewer operations than this reduce(), though it does more ifs.
-    simd8<uint8_t> bits = input.reduce([&](auto a, auto b) { return a | b; });
-    if (likely(!bits.any_bits_set_anywhere(0b10000000u))) {
-      // This has the same semantics as EOF: we only have to check for multibyte characters in part
-      // 1 that got cut off
-      this->has_error |= utf8_validation::check_eof(this->prev_input);
-      // We don't bother setting prev_input because if prev_input has no error, that means it ends
-      // on the last byte and cannot affect the next input. If it has an error, it doesn't matter
-      // if things go wrong and we detect *more*, because error is basically a boolean.
-    } else {
-      // it is not ascii so we have to do heavy work
-      input.each([&](auto _in) {
-        this->has_error |= utf8_validation::check_utf8_bytes(_in, this->prev_input);
-        this->prev_input = _in;
-      });
-    }
+    // it is not ascii so we have to do heavy work
+    this->error |= utf8_validation::check_input(input, this->prev_input);
+  }
+
+  really_inline void check_next_input(simd8x64<uint8_t> input, simd8x64<uint8_t> input2) {
+    this->error |= utf8_validation::check_input(input, input2, this->prev_input);
   }
 
   really_inline ErrorValues errors() {
-    return this->has_error.any_bits_set_anywhere() ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
+    return this->error.any_bits_set_anywhere() ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
   }
 
 }; // struct utf8_checker
+
+struct utf8_checker;
+
