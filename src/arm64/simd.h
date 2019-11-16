@@ -169,8 +169,9 @@ namespace simdjson::arm64::simd {
       ));
     }
 
-    really_inline simd8<uint8_t> apply_lookup_16_to(const simd8<uint8_t> original) {
-      return vqtbl1q_u8(*this, original);
+    template<typename T>
+    really_inline simd8<uint8_t> apply_lookup_16_to(const simd8<T> original) {
+      return vqtbl1q_u8(*this, simd8<uint8_t>(original));
     }
   };
 
@@ -256,8 +257,9 @@ namespace simdjson::arm64::simd {
       ));
     }
 
-    really_inline simd8<int8_t> apply_lookup_16_to(const simd8<uint8_t> original) {
-      return vqtbl1q_s8(*this, original);
+    template<typename T>
+    really_inline simd8<int8_t> apply_lookup_16_to(const simd8<T> original) {
+      return vqtbl1q_s8(*this, simd8<uint8_t>(original));
     }
   };
 
