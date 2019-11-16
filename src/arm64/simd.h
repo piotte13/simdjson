@@ -240,7 +240,7 @@ namespace simdjson::arm64::simd {
 
     template<typename T>
     really_inline simd8<int8_t> apply_lookup_16_to(const simd8<T> original) {
-      return vqtbl1q_s8(*this, original);
+      return vqtbl1q_s8(*this, simd8<uint8_t>(original));
     }
   };
 
