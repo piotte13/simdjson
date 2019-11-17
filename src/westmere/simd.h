@@ -42,7 +42,8 @@ namespace simdjson::westmere::simd {
 
   template<typename T, typename Mask=simd8<bool>>
   struct base8: base<simd8<T>> {
-    typedef int bitmask_t;
+    typedef uint16_t bitmask_t;
+    typedef uint32_t bitmask2_t;
 
     really_inline base8() : base<simd8<T>>() {}
     really_inline base8(const __m128i _value) : base<simd8<T>>(_value) {}
@@ -67,7 +68,7 @@ namespace simdjson::westmere::simd {
     // Splat constructor
     really_inline simd8<bool>(bool _value) : base8<bool>(splat(_value)) {}
 
-    really_inline bitmask_t to_bitmask() const { return _mm_movemask_epi8(*this); }
+    really_inline int to_bitmask() const { return _mm_movemask_epi8(*this); }
     really_inline bool any() const { return !_mm_testz_si128(*this, *this); }
   };
 
@@ -204,6 +205,8 @@ namespace simdjson::westmere::simd {
     really_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
     really_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
+    // Take the high bit of each byte and put together a bitmask
+    really_inline int high_bits_to_bitmask() const { return simd8<bool>(*this).to_bitmask(); }
   };
 
   template<typename T>

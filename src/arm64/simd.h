@@ -47,7 +47,8 @@ namespace simdjson::arm64::simd {
   // SIMD byte mask type (returned by things like eq and gt)
   template<>
   struct simd8<bool>: base_u8<bool> {
-    typedef uint32_t bitmask_t;
+    typedef uint16_t bitmask_t;
+    typedef uint32_t bitmask2_t;
 
     static really_inline simd8<bool> splat(bool _value) { return vmovq_n_u8(-(!!_value)); }
 
@@ -57,7 +58,9 @@ namespace simdjson::arm64::simd {
     // Splat constructor
     really_inline simd8(bool _value) : simd8(splat(_value)) {}
 
-    really_inline simd8<bool>::bitmask_t to_bitmask() const {
+    // We return uint32_t instead of uint16_t because that seems to be more efficient for most
+    // purposes (cutting it down to uint16_t costs performance in some compilers).
+    really_inline uint32_t to_bitmask() const {
       const uint8x16_t bit_mask = {0x01, 0x02, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80,
                                    0x01, 0x02, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80};
       auto minput = *this & bit_mask;
@@ -130,6 +133,10 @@ namespace simdjson::arm64::simd {
     really_inline simd8<uint8_t> shr() const { return vshrq_n_u8(*this, N); }
     template<int N>
     really_inline simd8<uint8_t> shl() const { return vshlq_n_u8(*this, N); }
+    // Take the high bit of each byte and turn it into a bitmask
+    really_inline uint32_t high_bits_to_bitmask() const {
+      return simd8<bool>(*this).to_bitmask();
+    }
 
     // Perform a lookup assuming no value is larger than 16
     template<typename L>
