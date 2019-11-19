@@ -133,10 +133,6 @@ namespace simdjson::arm64::simd {
     really_inline simd8<uint8_t> shr() const { return vshrq_n_u8(*this, N); }
     template<int N>
     really_inline simd8<uint8_t> shl() const { return vshlq_n_u8(*this, N); }
-    // Take the high bit of each byte and turn it into a bitmask
-    really_inline uint32_t high_bits_to_bitmask() const {
-      return simd8<bool>(*this).to_bitmask();
-    }
 
     // Perform a lookup assuming the value is between 0 and 16 (undefined behavior for out of range values)
     template<typename L>

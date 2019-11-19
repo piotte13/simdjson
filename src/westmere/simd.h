@@ -206,8 +206,10 @@ namespace simdjson::westmere::simd {
     really_inline simd8<uint8_t> shr() const { return simd8<uint8_t>(_mm_srli_epi16(*this, N)) & uint8_t(0xFFu >> N); }
     template<int N>
     really_inline simd8<uint8_t> shl() const { return simd8<uint8_t>(_mm_slli_epi16(*this, N)) & uint8_t(0xFFu << N); }
-    // Take the high bit of each byte and put together a bitmask
-    really_inline int high_bits_to_bitmask() const { return simd8<bool>(*this).to_bitmask(); }
+    // Get one of the bits and make a bitmask out of it.
+    // e.g. value.get_bit<7>() gets the high bit
+    template<int N>
+    really_inline int get_bit() const { return _mm_movemask_epi8(_mm_slli_epi16(*this, 7-N)); }
   };
 
   template<typename T>
