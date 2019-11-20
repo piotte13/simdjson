@@ -1,5 +1,5 @@
 //
-// Detect Unicode errors.
+// Detect UTF-8 errors.
 //
 // UTF-8 is designed to allow multiple bytes and be compatible with ASCII. It's a fairly basic
 // encoding that uses the first few bits on each byte to denote a "byte type", and all other bits
@@ -14,7 +14,7 @@
 // - 4 byte character (23 bits):  11110___ 10______ 10______ 10______
 // - 5+ byte character (illegal): 11111___ <illegal>
 //
-// There are 5 classes of error that can happen in Unicode:
+// There are 5 classes of error that can happen in UTF-8:
 //
 // - TOO_SHORT: when you have a multibyte character with too few bytes (i.e. missing continuation).
 //   We detect this by looking for new characters (lead bytes) inside the range of a multibyte
@@ -353,6 +353,9 @@ struct utf8_checker {
   simd8<uint8_t> error;
   simd8<uint8_t> prev_input;
 
+  template<size_t N>
+  really_inline void check_utf8(const uint8_t* buf);
+
   really_inline void check_next_input(simd8x64<uint8_t> input) {
     // Total: 9 simd constants
     // [256-bit]
@@ -376,5 +379,12 @@ struct utf8_checker {
 
 }; // struct utf8_checker
 
-struct utf8_checker;
-
+template<>
+really_inline void utf8_checker::check_utf8<64>(const uint8_t* buf) {
+  this->check_next_input(simd8x64<uint8_t>(buf));
+}
+template<>
+really_inline void utf8_checker::check_utf8<128>(const uint8_t* buf) {
+  this->check_utf8<64>(buf);
+  this->check_utf8<64>(&buf[64]);
+}

@@ -312,6 +312,9 @@ struct utf8_checker {
     this->check_special_cases(bytes);
   }
 
+  template<size_t N>
+  really_inline void check_utf8(const uint8_t* buf);
+
   really_inline void check_next_input(simd8<uint8_t> bytes) {
     vmask_t bit_7 = bytes.get_bit<7>();
     if (unlikely(bit_7)) {
@@ -333,3 +336,13 @@ struct utf8_checker {
     return (this->special_case_errors.any_bits_set_anywhere() | this->length_errors) ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
   }
 }; // struct utf8_checker
+
+template<>
+really_inline void utf8_checker::check_utf8<64>(const uint8_t* buf) {
+  this->check_next_input(simd8x64<uint8_t>(buf));
+}
+template<>
+really_inline void utf8_checker::check_utf8<128>(const uint8_t* buf) {
+  this->check_utf8<64>(buf);
+  this->check_utf8<64>(&buf[64]);
+}

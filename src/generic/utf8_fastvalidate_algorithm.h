@@ -151,6 +151,9 @@ struct utf8_checker {
     this->previous = pb;
   }
 
+  template<size_t N>
+  really_inline void check_utf8(const uint8_t* buf);
+
   really_inline void check_next_input(simd8<uint8_t> in) {
     if (likely(!in.any_bits_set_anywhere(0x80u))) {
       this->check_carried_continuations();
@@ -174,3 +177,13 @@ struct utf8_checker {
     return this->has_error.any_bits_set_anywhere() ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
   }
 }; // struct utf8_checker
+
+template<>
+really_inline void utf8_checker::check_utf8<64>(const uint8_t* buf) {
+  this->check_next_input(simd8x64<uint8_t>(buf));
+}
+template<>
+really_inline void utf8_checker::check_utf8<128>(const uint8_t* buf) {
+  this->check_utf8<64>(buf);
+  this->check_utf8<64>(&buf[64]);
+}
