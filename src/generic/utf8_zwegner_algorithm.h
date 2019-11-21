@@ -325,11 +325,38 @@ struct utf8_checker {
     }
   }
 
-  really_inline void check_next_input(simd8x64<uint8_t> in) {
-    in.each([&](auto bytes) { this->check_next_input(bytes); });
-  }
+  template<size_t N=sizeof(simd8<uint8_t>)>
+  really_inline void check_next_input(simd8x64<uint8_t> in);
 
   really_inline ErrorValues errors() {
     return (this->special_case_errors.any_bits_set_anywhere() | this->length_errors) ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
   }
 }; // struct utf8_checker
+
+template<>
+really_inline void utf8_checker::check_next_input<16>(simd8x64<uint8_t> in) {
+  auto high_bit0 = in.chunks[0].get_bit<7>();
+  auto high_bit1 = in.chunks[1].get_bit<7>();
+  auto high_bit2 = in.chunks[2].get_bit<7>();
+  auto high_bit3 = in.chunks[3].get_bit<7>();
+  if (unlikely(high_bit0 || high_bit1 || high_bit2 || high_bit3)) {
+    this->check_utf8_bytes(in.chunks[0], high_bit0);
+    this->check_utf8_bytes(in.chunks[1], high_bit1);
+    this->check_utf8_bytes(in.chunks[2], high_bit2);
+    this->check_utf8_bytes(in.chunks[3], high_bit3);
+  } else {
+    this->length_errors |= this->last_cont;
+  }
+}
+
+template<>
+really_inline void utf8_checker::check_next_input<32>(simd8x64<uint8_t> in) {
+  auto high_bit0 = in.chunks[0].get_bit<7>();
+  auto high_bit1 = in.chunks[1].get_bit<7>();
+  if (unlikely(high_bit0 || high_bit1)) {
+    this->check_utf8_bytes(in.chunks[0], high_bit0);
+    this->check_utf8_bytes(in.chunks[1], high_bit1);
+  } else {
+    this->length_errors |= this->last_cont;
+  }
+}
