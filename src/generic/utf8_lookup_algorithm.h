@@ -276,98 +276,24 @@ struct utf8_checker {
     this->error |= this->prev_incomplete;
   }
 
-  really_inline void check_next_input(simd8<uint8_t> input1) {
-    simd8<uint8_t> bits = input1;
+  really_inline void check_next_input(simd8x64<uint8_t> input) {
+    simd8<uint8_t> bits = input.reduce([&](auto a,auto b) { return a|b; });
     if (likely(!bits.any_bits_set_anywhere(0b10000000u))) {
       // If the previous block had incomplete UTF-8 characters at the end, an ASCII block can't
       // possibly finish them.
       this->error |= this->prev_incomplete;
     } else {
-      this->error |= check_utf8_bytes(input1, this->prev_input_block);
-      this->prev_input_block = input1;
+      this->error |= this->check_utf8_bytes(input.chunks[0], this->prev_input_block);
+      for (int i=1; i<simd8x64<uint8_t>::NUM_CHUNKS; i++) {
+        this->error |= this->check_utf8_bytes(input.chunks[i], input.chunks[i-1]);
+      }
+      this->prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
       this->set_fast_path_error();
     }
   }
-  really_inline void check_next_input(simd8<uint8_t> input1, simd8<uint8_t> input2) {
-    simd8<uint8_t> bits = input1 | input2;
-    if (likely(!bits.any_bits_set_anywhere(0b10000000u))) {
-      // If the previous block had incomplete UTF-8 characters at the end, an ASCII block can't
-      // possibly finish them.
-      this->error |= this->prev_incomplete;
-    } else {
-      this->error |= check_utf8_bytes(input1, this->prev_input_block) |
-                     check_utf8_bytes(input2, input1);
-      this->prev_input_block = input2;
-      this->set_fast_path_error();
-    }
-  }
-  really_inline void check_next_input(simd8<uint8_t> input1, simd8<uint8_t> input2, simd8<uint8_t> input3, simd8<uint8_t> input4) {
-    simd8<uint8_t> bits = input1 | input2 | input3 | input4;
-    if (likely(!bits.any_bits_set_anywhere(0b10000000u))) {
-      // If the previous block had incomplete UTF-8 characters at the end, an ASCII block can't
-      // possibly finish them.
-      this->error |= this->prev_incomplete;
-    } else {
-      this->error |= check_utf8_bytes(input1, this->prev_input_block) |
-                     check_utf8_bytes(input2, input1) |
-                     check_utf8_bytes(input3, input2) |
-                     check_utf8_bytes(input4, input3);
-      // Set the fast path error: if the next block is ASCII, this will indicate an error.
-      // TODO make sure this only actually gets set once if we are checking multiple inputs
-      this->prev_input_block = input4;
-      this->set_fast_path_error();
-    }
-  }
-  really_inline void check_next_input(simd8<uint8_t> input1, simd8<uint8_t> input2, simd8<uint8_t> input3, simd8<uint8_t> input4, simd8<uint8_t> input5, simd8<uint8_t> input6, simd8<uint8_t> input7, simd8<uint8_t> input8) {
-    simd8<uint8_t> bits = input1 | input2 | input3 | input4 | input5 | input6 | input7 | input8;
-    if (likely(!bits.any_bits_set_anywhere(0b10000000u))) {
-      // If the previous block had incomplete UTF-8 characters at the end, an ASCII block can't
-      // possibly finish them.
-      this->error |= this->prev_incomplete;
-    } else {
-      this->error |= check_utf8_bytes(input1, this->prev_input_block) |
-                     check_utf8_bytes(input2, input1) |
-                     check_utf8_bytes(input3, input2) |
-                     check_utf8_bytes(input4, input3) |
-                     check_utf8_bytes(input5, input4) |
-                     check_utf8_bytes(input6, input5) |
-                     check_utf8_bytes(input7, input6) |
-                     check_utf8_bytes(input8, input7);
-      this->prev_input_block = input8;
-      this->set_fast_path_error();
-    }
-  }
-
-  template<size_t S=sizeof(simd8<uint8_t>)>
-  really_inline void check_next_input(simd8x64<uint8_t> input);
-
-  template<size_t S=sizeof(simd8<uint8_t>)>
-  really_inline void check_next_input(simd8x64<uint8_t> input, simd8x64<uint8_t> input2);
 
   really_inline ErrorValues errors() {
     return this->error.any_bits_set_anywhere() ? simdjson::UTF8_ERROR : simdjson::SUCCESS;
   }
 
 }; // struct utf8_checker
-
-// These break up simd8x64<>
-
-template<>
-really_inline void utf8_checker::check_next_input<32>(simd8x64<uint8_t> input) {
-  this->check_next_input(input.chunks[0], input.chunks[1]);
-}
-template<>
-really_inline void utf8_checker::check_next_input<16>(simd8x64<uint8_t> input) {
-  this->check_next_input(input.chunks[0], input.chunks[1], input.chunks[2], input.chunks[3]);
-}
-
-template<>
-really_inline void utf8_checker::check_next_input<32>(simd8x64<uint8_t> input, simd8x64<uint8_t> input2) {
-  this->check_next_input(input.chunks[0], input.chunks[1], input2.chunks[0], input2.chunks[1]);
-}
-template<>
-really_inline void utf8_checker::check_next_input<16>(simd8x64<uint8_t> input, simd8x64<uint8_t> input2) {
-  this->check_next_input(input.chunks[0], input.chunks[1], input.chunks[2], input.chunks[3], input2.chunks[0], input2.chunks[1], input2.chunks[2], input2.chunks[3]);
-}
-
-
